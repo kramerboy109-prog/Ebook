@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Haus-Dach -->
+    <path android:fillColor="#D9A86C" android:pathData="M54,24 L80,44 L76,44 L54,28 L32,44 L28,44 Z" />
+    <!-- Offenes Buch -->
+    <path android:fillColor="#F6EFE3" android:pathData="M30,50 C38,46 47,47 53,52 L53,78 C47,73 38,72 30,76 Z" />
+    <path android:fillColor="#EADFCB" android:pathData="M78,50 C70,46 61,47 55,52 L55,78 C61,73 70,72 78,76 Z" />
+    <path android:fillColor="#B08D57" android:pathData="M53,52 L55,52 L55,79 L53,79 Z" />
+    <path android:strokeColor="#B9A88C" android:strokeWidth="1" android:pathData="M34,56 C39,54 44,54 49,57 M34,61 C39,59 44,59 49,62 M34,66 C39,64 44,64 49,67 M59,57 C64,54 69,54 74,56 M59,62 C64,59 69,59 74,61 M59,67 C64,64 69,64 74,66" />
+    <!-- Lesezeichen -->
+    <path android:fillColor="#9B2F3F" android:pathData="M66,48 L71,48 L71,60 L68.5,57.5 L66,60 Z" />
+</vector>
