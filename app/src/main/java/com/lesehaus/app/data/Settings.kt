@@ -17,6 +17,8 @@ enum class ReaderTheme(val label: String, val bg: Int, val fg: Int, val accent: 
     NIGHT("Nacht (OLED)", 0xFF000000.toInt(), 0xFFB8B2A7.toInt(), 0xFFB08D57.toInt(), true),
 }
 
+const val DEFAULT_AI_STYLE = "Du bist ein erfahrener deutscher Hörbuchsprecher. Lies warm, ruhig und lebendig vor. Gib Dialogen die passende Stimmung der Figuren, mache natürliche Pausen an Absätzen und lies Überschriften etwas langsamer."
+
 enum class PageMode(val label: String) { PAGED("Blättern"), SCROLL("Scrollen") }
 enum class PageAnimation(val label: String) { SLIDE("Schieben"), CURL("Umblättern"), FADE("Überblenden"), STACK("Stapel"), NONE("Keine") }
 enum class TextAlignMode(val label: String) { JUSTIFY("Blocksatz"), START("Linksbündig") }
@@ -57,6 +59,17 @@ data class ReaderSettings(
     val showImages: Boolean = true,
     val ttsRate: Float = 1.0f,
     val ttsPitch: Float = 1.0f,
+    /** Name der Erzählerstimme (leer = Standard des Geräts). */
+    val ttsVoice: String = "",
+    /** Stimme für wörtliche Rede (leer = Erzählerstimme mit anderer Tonhöhe). */
+    val ttsDialogVoice: String = "",
+    val ttsDialogPitch: Float = 1.12f,
+    /** Erzählmodus: natürliche Pausen, Dialoge mit eigener Stimme, Betonung von Fragen/Ausrufen. */
+    val ttsSmart: Boolean = true,
+    /** "SYSTEM" oder "AI" (KI-Stimme online). */
+    val ttsEngine: String = "SYSTEM",
+    val aiVoice: String = "coral",
+    val aiStyle: String = DEFAULT_AI_STYLE,
 ) {
     /** Einstellungen, die das Seitenlayout beeinflussen (für Pagination-Cache). */
     fun layoutKey(): String = listOf(fontKey, fontSize, fontWeight, lineHeight, letterSpacing, paragraphSpacing, indent, marginH, marginV, align, hyphenation, showHeader, showFooter, showImages, pageMode).joinToString("|")
@@ -72,6 +85,10 @@ data class AppSettings(
     val onboarded: Boolean = false,
     val roomSounds: Boolean = false,
     val customFonts: List<String> = emptyList(),
+    /** API-Schlüssel für die KI-Stimme (bleibt nur auf dem Gerät). */
+    val aiKey: String = "",
+    /** Zimmerklang beim Lesen weiterspielen. */
+    val roomAmbienceInReader: Boolean = true,
 )
 
 class SettingsStore(context: Context) {
@@ -133,6 +150,13 @@ class SettingsStore(context: Context) {
                 showImages = getBoolean("r_images", d.showImages),
                 ttsRate = getFloat("r_ttsrate", d.ttsRate),
                 ttsPitch = getFloat("r_ttspitch", d.ttsPitch),
+                ttsVoice = getString("r_ttsvoice", d.ttsVoice) ?: "",
+                ttsDialogVoice = getString("r_ttsdialog", d.ttsDialogVoice) ?: "",
+                ttsDialogPitch = getFloat("r_ttsdialogpitch", d.ttsDialogPitch),
+                ttsSmart = getBoolean("r_ttssmart", d.ttsSmart),
+                ttsEngine = getString("r_ttsengine", d.ttsEngine) ?: "SYSTEM",
+                aiVoice = getString("r_aivoice", d.aiVoice) ?: d.aiVoice,
+                aiStyle = getString("r_aistyle", d.aiStyle) ?: d.aiStyle,
             )
         }
     }
@@ -173,6 +197,13 @@ class SettingsStore(context: Context) {
             .putBoolean("r_images", s.showImages)
             .putFloat("r_ttsrate", s.ttsRate)
             .putFloat("r_ttspitch", s.ttsPitch)
+            .putString("r_ttsvoice", s.ttsVoice)
+            .putString("r_ttsdialog", s.ttsDialogVoice)
+            .putFloat("r_ttsdialogpitch", s.ttsDialogPitch)
+            .putBoolean("r_ttssmart", s.ttsSmart)
+            .putString("r_ttsengine", s.ttsEngine)
+            .putString("r_aivoice", s.aiVoice)
+            .putString("r_aistyle", s.aiStyle)
             .apply()
     }
 
@@ -189,6 +220,8 @@ class SettingsStore(context: Context) {
                 onboarded = getBoolean("a_onboarded", d.onboarded),
                 roomSounds = getBoolean("a_roomsounds", d.roomSounds),
                 customFonts = (getString("a_fonts", "") ?: "").split('\n').filter { it.isNotBlank() },
+                aiKey = getString("a_aikey", "") ?: "",
+                roomAmbienceInReader = getBoolean("a_roomamb", d.roomAmbienceInReader),
             )
         }
     }
@@ -204,6 +237,8 @@ class SettingsStore(context: Context) {
             .putBoolean("a_onboarded", s.onboarded)
             .putBoolean("a_roomsounds", s.roomSounds)
             .putString("a_fonts", s.customFonts.joinToString("\n"))
+            .putString("a_aikey", s.aiKey)
+            .putBoolean("a_roomamb", s.roomAmbienceInReader)
             .apply()
     }
 }

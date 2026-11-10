@@ -76,6 +76,9 @@ fun RoomEditorScreen(roomId: Long, onBack: () -> Unit, onDeleted: () -> Unit, on
     val scope = rememberCoroutineScope()
     val stored by app.db.rooms().observeRoom(roomId).collectAsState(initial = null)
     val shelves by app.db.shelves().observeShelves(roomId).collectAsState(initial = emptyList())
+    val items by app.db.rooms().observeItems(roomId).collectAsState(initial = emptyList())
+    var confirmReset by remember { mutableStateOf(false) }
+    LaunchedEffect(roomId) { app.ensureDecorated(roomId) }
     var room by remember { mutableStateOf<ReadingRoom?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     LaunchedEffect(stored?.id) { if (room == null) room = stored }
@@ -83,7 +86,7 @@ fun RoomEditorScreen(roomId: Long, onBack: () -> Unit, onDeleted: () -> Unit, on
     LaunchedEffect(room) {
         val r = room ?: return@LaunchedEffect
         delay(250)
-        if (r != stored) app.db.rooms().update(r)
+        if (r != stored) app.db.rooms().room(r.id)?.let { cur -> app.db.rooms().update(r.copy(decorated = cur.decorated)) }
     }
     val r = room ?: return
     fun upd(block: (ReadingRoom) -> ReadingRoom) { room = block(r) }
@@ -104,9 +107,11 @@ fun RoomEditorScreen(roomId: Long, onBack: () -> Unit, onDeleted: () -> Unit, on
             // Live-Vorschau
             RoomScene(
                 r,
-                Modifier
+                items = items,
+                bookcases = shelves.map { BookcaseData(it, emptyList()) },
+                modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1.6f)
+                    .aspectRatio(r.roomWidth.coerceIn(1.2f, 3f) / 1.15f)
                     .padding(horizontal = 12.dp)
                     .shadow(8.dp, RoundedCornerShape(16.dp))
                     .clip(RoundedCornerShape(16.dp)),
@@ -115,7 +120,7 @@ fun RoomEditorScreen(roomId: Long, onBack: () -> Unit, onDeleted: () -> Unit, on
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
                 OutlinedTextField(value = r.name, onValueChange = { v -> upd { it.copy(name = v) } }, label = { Text("Name des Zimmers") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Section("Zimmertyp")
-                Text("Ein Typ bringt passende Möbel und Farben mit – danach kannst du alles anpassen.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Ein Typ bringt passende Farben und Stimmung mit. Möbel verschiebst du direkt im Zimmer über „Einrichten“.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     RoomType.entries.forEach { t ->
                         FilterChip(selected = r.type == t.name, onClick = {
@@ -151,18 +156,19 @@ fun RoomEditorScreen(roomId: Long, onBack: () -> Unit, onDeleted: () -> Unit, on
                 Slider(value = r.lightLevel, onValueChange = { v -> upd { it.copy(lightLevel = v) } })
                 Text("Wärme", style = MaterialTheme.typography.labelLarge)
                 Slider(value = r.lightWarmth, onValueChange = { v -> upd { it.copy(lightWarmth = v) } })
-                Section("Einrichtung")
+                Section("Zimmergröße")
+                Text("Wie weit du dich im Zimmer umschauen kannst.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Slider(value = r.roomWidth, onValueChange = { v -> upd { it.copy(roomWidth = v) } }, valueRange = 1.0f..3.5f)
+                Section("Tür im Flur")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Furniture.entries.forEach { f ->
-                        val on = f.name in r.furnitureList
-                        FilterChip(
-                            selected = on,
-                            onClick = { upd { it.copy(furniture = (if (on) it.furnitureList - f.name else it.furnitureList + f.name).joinToString(",")) } },
-                            label = { Text(f.label) },
-                            leadingIcon = if (on) ({ Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }) else null,
-                        )
-                    }
+                    com.lesehaus.app.data.DoorStyle.entries.forEach { d -> FilterChip(selected = r.doorStyle == d.name, onClick = { upd { it.copy(doorStyle = d.name) } }, label = { Text(d.label) }) }
                 }
+                Spacer(Modifier.height(6.dp))
+                ColorRow(com.lesehaus.app.data.DoorPalette.filter { it != 0 }, r.doorColor) { c -> upd { it.copy(doorColor = c) } }
+                TextButton(onClick = { upd { it.copy(doorColor = 0) } }) { Text("Türfarbe passend zum Zimmer") }
+                Section("Einrichtung")
+                Text("Möbel, Bilder, Pflanzen und Regale verschiebst du direkt im Zimmer (Pinsel-Symbol → Einrichten).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { confirmReset = true }) { Text("Einrichtung auf die Vorlage „${RoomType.entries.firstOrNull { it.name == r.type }?.label ?: r.type}“ zurücksetzen") }
                 Section("Raumklang")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     AmbientSound.entries.forEach { a -> FilterChip(selected = r.ambientSound == a.name, onClick = { upd { it.copy(ambientSound = a.name) } }, label = { Text(a.label) }) }
@@ -184,6 +190,15 @@ fun RoomEditorScreen(roomId: Long, onBack: () -> Unit, onDeleted: () -> Unit, on
                 Spacer(Modifier.height(40.dp))
             }
         }
+    }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Einrichtung zurücksetzen?") },
+            text = { Text("Alle Möbel und Bilder werden durch die Vorlage ersetzt, Regale neu aufgestellt. Bücher bleiben erhalten.") },
+            confirmButton = { TextButton(onClick = { scope.launch { app.db.rooms().update(r); app.resetDecoration(r.id); room = app.db.rooms().room(r.id) }; confirmReset = false }) { Text("Zurücksetzen") } },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Abbrechen") } },
+        )
     }
     if (confirmDelete) {
         AlertDialog(

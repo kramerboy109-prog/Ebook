@@ -1,11 +1,12 @@
 package com.lesehaus.app.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-/** Ein eingerichtetes Zimmer im Lesehaus (reines Ambiente + Ort für Bücherregale). */
+/** Ein eingerichtetes Zimmer in Benny's Library (reines Ambiente + Ort für Bücherregale). */
 @Entity(tableName = "rooms")
 data class ReadingRoom(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -23,6 +24,14 @@ data class ReadingRoom(
     val curtainColor: Int,
     val sortIndex: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
+    /** Türstil im Flur. */
+    @ColumnInfo(defaultValue = "PANEL") val doorStyle: String = "PANEL",
+    /** Türfarbe (0 = passend zum Zimmer). */
+    @ColumnInfo(defaultValue = "0") val doorColor: Int = 0,
+    /** Breite des Zimmers im Verhältnis zur Höhe (zum Umschauen). */
+    @ColumnInfo(defaultValue = "1.5") val roomWidth: Float = 1.5f,
+    /** true, sobald die frei platzierbare Einrichtung angelegt wurde. */
+    @ColumnInfo(defaultValue = "0") val decorated: Boolean = false,
 ) {
     val furnitureList: List<String> get() = furniture.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 }
@@ -52,6 +61,16 @@ data class Shelf(
     val sortOrder: String = "TITLE",
     val sortIndex: Int = 0,
     val lastScan: Long = 0,
+    /** Bauform des Regals im Zimmer. */
+    @ColumnInfo(defaultValue = "TALL") val style: String = "TALL",
+    /** Anordnung der Bücher (alphabetisch, Regenbogen, gemischt …). */
+    @ColumnInfo(defaultValue = "ALPHA") val arrangement: String = "ALPHA",
+    /** Position im Zimmer (x: Mitte als Anteil der Zimmerbreite, y: Unterkante als Anteil der Höhe); x < 0 = noch nicht platziert. */
+    @ColumnInfo(defaultValue = "-1.0") val posX: Float = -1f,
+    @ColumnInfo(defaultValue = "0.75") val posY: Float = 0.75f,
+    @ColumnInfo(defaultValue = "1.0") val scale: Float = 1f,
+    /** Dekoration in den Fächern (Pflanzen, Kerzen, Figuren). */
+    @ColumnInfo(defaultValue = "1") val decor: Boolean = true,
 ) {
     val folderList: List<String> get() = folders.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
     val fileTypeSet: Set<String> get() = fileTypes.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
@@ -163,4 +182,29 @@ data class ReadingSession(
     val startedAt: Long,
     val durationMs: Long,
     val pages: Int,
+)
+
+/** Ein frei platzierbarer Einrichtungsgegenstand (Möbel, Bild, Pflanze, Fenster …). */
+@Entity(
+    tableName = "room_items",
+    foreignKeys = [ForeignKey(entity = ReadingRoom::class, parentColumns = ["id"], childColumns = ["roomId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("roomId")],
+)
+data class RoomItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val roomId: Long,
+    val type: String,
+    /** Mitte als Anteil der Zimmerbreite. */
+    val x: Float,
+    /** Unterkante als Anteil der Zimmerhöhe. */
+    val y: Float,
+    val scale: Float = 1f,
+    val flip: Boolean = false,
+    val z: Int = 0,
+    /** Farbe (0 = Standard). */
+    val color: Int = 0,
+    val variant: Int = 0,
+    /** Eigenes Bild (z. B. Foto im Rahmen). */
+    val imagePath: String? = null,
+    val label: String? = null,
 )

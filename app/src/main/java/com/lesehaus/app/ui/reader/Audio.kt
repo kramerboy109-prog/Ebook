@@ -6,6 +6,10 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
+import com.lesehaus.app.data.ReaderSettings
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import com.lesehaus.app.data.AmbientSound
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,12 +26,53 @@ import kotlin.random.Random
 // ------------------------------------------------------------------------------------------------
 data class SpokenRange(val chapter: Int, val start: Int, val end: Int, val wordStart: Int = -1, val wordEnd: Int = -1)
 
+/** Eine auswählbare Gerätestimme. */
+data class VoiceInfo(
+    val name: String,
+    val label: String,
+    val locale: Locale,
+    val quality: Int,
+    val network: Boolean,
+    val gender: String?,
+)
+
+/** Absatz eines Kapitels für den Erzählmodus. */
+data class NarrationParagraph(val start: Int, val end: Int, val heading: Boolean)
+
+internal data class Segment(val start: Int, val end: Int, val dialog: Boolean)
+
+/** Teilt einen Satz in Erzähl- und Dialogteile (wörtliche Rede in »…«, „…“, "…"). */
+internal object DialogSplitter {
+    private val pairs = mapOf('»' to '«', '«' to '»', '„' to '“', '“' to '”', '"' to '"', '‚' to '‘')
+
+    /** Liefert Segmente; [inQuote] trägt den Zustand über Satzgrenzen hinweg. */
+    fun split(text: String, start: Int, end: Int, state: BooleanArray, closer: CharArray): List<Segment> {
+        val out = ArrayList<Segment>()
+        var segStart = start
+        var i = start
+        while (i < end) {
+            val c = text[i]
+            if (!state[0] && pairs.containsKey(c) && !(c == '‚' && i > 0 && text[i - 1].isLetter())) {
+                if (i > segStart) out += Segment(segStart, i, false)
+                state[0] = true; closer[0] = pairs[c]!!; segStart = i
+            } else if (state[0] && (c == closer[0] || (closer[0] == '“' && c == '"'))) {
+                out += Segment(segStart, i + 1, true)
+                state[0] = false; segStart = i + 1
+            }
+            i++
+        }
+        if (segStart < end) out += Segment(segStart, end, state[0])
+        return out.filter { s -> text.substring(s.start, s.end).any { it.isLetterOrDigit() } }
+    }
+}
+
 class TtsController(context: Context) {
+    private val appContext = context.applicationContext
     private var ready = false
     private var pending: (() -> Unit)? = null
-    private val tts: TextToSpeech = TextToSpeech(context.applicationContext) { status ->
+    private val tts: TextToSpeech = TextToSpeech(appContext) { status ->
         ready = status == TextToSpeech.SUCCESS
-        if (ready) pending?.invoke()
+        if (ready) { refreshVoices(); pending?.invoke() }
         pending = null
     }
 
@@ -37,12 +82,19 @@ class TtsController(context: Context) {
     val range: StateFlow<SpokenRange?> = _range.asStateFlow()
     private val _sleepAt = MutableStateFlow(0L)
     val sleepAt: StateFlow<Long> = _sleepAt.asStateFlow()
+    private val _voices = MutableStateFlow<List<VoiceInfo>>(emptyList())
+    val voices: StateFlow<List<VoiceInfo>> = _voices.asStateFlow()
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+    private val _engineLabel = MutableStateFlow("")
+    val engineLabel: StateFlow<String> = _engineLabel.asStateFlow()
 
     /** Wird aufgerufen, wenn das Kapitel fertig vorgelesen ist. */
     var onChapterDone: ((Int) -> Unit)? = null
 
     private val sentences = HashMap<String, SpokenRange>()
     private var lastId: String? = null
+    private val cloud = CloudNarrator(appContext)
 
     init {
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -70,41 +122,125 @@ class TtsController(context: Context) {
                 _speaking.value = false
             }
         })
+        cloud.onRange = { _range.value = it }
+        cloud.onChapterDone = { ch ->
+            if (_sleepAt.value in 1 until System.currentTimeMillis()) { stop(); _sleepAt.value = 0L } else onChapterDone?.invoke(ch)
+        }
+        cloud.onError = { msg -> _error.value = msg; _speaking.value = false }
     }
 
+    private var language: Locale = Locale.getDefault()
+
     fun setLanguage(lang: String) {
-        val locale = if (lang.isNotBlank()) Locale.forLanguageTag(lang) else Locale.getDefault()
-        runCatching {
-            if (tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE) tts.language = locale
+        language = if (lang.isNotBlank()) Locale.forLanguageTag(lang) else Locale.getDefault()
+        runCatching { if (tts.isLanguageAvailable(language) >= TextToSpeech.LANG_AVAILABLE) tts.language = language }
+    }
+
+    fun clearError() { _error.value = null }
+
+    fun refreshVoices() {
+        val list = runCatching { tts.voices?.toList() }.getOrNull().orEmpty()
+            .filter { v -> v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true }
+            .sortedWith(compareBy({ it.locale.toLanguageTag() }, { it.name }))
+        val counters = HashMap<String, Int>()
+        _voices.value = list.map { v ->
+            val n = v.name.lowercase()
+            val gender = when {
+                n.contains("female") || Regex("[-_]f\\d{2}|smtf\\d").containsMatchIn(n) -> "weiblich"
+                n.contains("male") || Regex("[-_]m\\d{2}|smtm\\d").containsMatchIn(n) -> "männlich"
+                else -> null
+            }
+            val key = v.locale.toLanguageTag()
+            val num = (counters[key] ?: 0) + 1
+            counters[key] = num
+            val country = v.locale.getDisplayCountry(Locale.GERMAN).ifBlank { v.locale.getDisplayLanguage(Locale.GERMAN) }
+            VoiceInfo(
+                name = v.name,
+                label = "Stimme $num" + (if (country.isNotBlank()) " ($country)" else ""),
+                locale = v.locale,
+                quality = v.quality,
+                network = v.isNetworkConnectionRequired,
+                gender = gender,
+            )
         }
     }
 
-    fun setRate(rate: Float, pitch: Float) {
-        tts.setSpeechRate(rate)
+    private fun voiceByName(name: String): Voice? = runCatching { tts.voices?.firstOrNull { it.name == name } }.getOrNull()
+
+    private fun apply(voice: Voice?, pitch: Float, rate: Float) {
+        if (voice != null) tts.voice = voice else runCatching { tts.language = language }
         tts.setPitch(pitch)
+        tts.setSpeechRate(rate)
     }
 
-    /** Liest ein Kapitel ab [from] satzweise vor. */
-    fun speak(chapter: Int, text: String, from: Int) {
-        if (!ready) { pending = { speak(chapter, text, from) }; return }
+    /** Spielt eine kurze Hörprobe. */
+    fun preview(voiceName: String, pitch: Float, rate: Float, text: String = "Es war einmal ein kleines Haus voller Bücher, in dem es immer nach Tee und Kaminholz duftete.") {
+        if (!ready) { pending = { preview(voiceName, pitch, rate, text) }; return }
+        stop()
+        apply(voiceByName(voiceName), pitch, rate)
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview")
+    }
+
+    fun previewCloud(apiKey: String, voice: String, style: String) {
+        stop()
+        cloud.preview(apiKey, voice, style)
+    }
+
+    /** Liest ein Kapitel ab [from] vor – je nach Einstellung mit Gerätestimme oder KI-Stimme. */
+    fun speak(chapter: Int, text: String, from: Int, paragraphs: List<NarrationParagraph>, s: ReaderSettings, apiKey: String) {
+        if (s.ttsEngine == "AI" && apiKey.isNotBlank()) {
+            tts.stop()
+            _engineLabel.value = "KI-Stimme"
+            _speaking.value = true
+            cloud.speak(chapter, text, from, paragraphs, apiKey, s.aiVoice, s.aiStyle)
+            return
+        }
+        if (!ready) { pending = { speak(chapter, text, from, paragraphs, s, apiKey) }; return }
+        cloud.stop()
+        _engineLabel.value = "Gerätestimme"
         tts.stop()
         sentences.clear()
-        val it = BreakIterator.getSentenceInstance()
-        it.setText(text)
-        var start = it.preceding((from + 1).coerceIn(1, text.length)).let { p -> if (p == BreakIterator.DONE) 0 else p }
-        var end = it.following(start)
+        val narrator = voiceByName(s.ttsVoice)
+        val dialogVoice = voiceByName(s.ttsDialogVoice) ?: narrator
+        val paras = paragraphs.filter { it.end > from }.ifEmpty { listOf(NarrationParagraph(from, text.length, false)) }
         var n = 0
-        while (end != BreakIterator.DONE && start < text.length) {
-            val raw = text.substring(start, end)
-            val clean = raw.replace('​', ' ').replace('￼', ' ')
-            if (clean.isNotBlank()) {
-                val id = "s_${chapter}_${n++}"
-                sentences[id] = SpokenRange(chapter, start, end)
-                tts.speak(clean, TextToSpeech.QUEUE_ADD, null, id)
-                lastId = id
+        val it = BreakIterator.getSentenceInstance(language)
+        for (p in paras) {
+            val pStart = maxOf(p.start, from)
+            if (pStart >= p.end) continue
+            it.setText(text.substring(0, p.end))
+            var start = if (pStart == p.start) p.start else it.preceding((pStart + 1).coerceIn(1, p.end)).let { b -> if (b == BreakIterator.DONE || b < p.start) p.start else b }
+            val quoteState = BooleanArray(1)
+            val closer = CharArray(1)
+            while (start < p.end) {
+                var end = it.following(start)
+                if (end == BreakIterator.DONE || end > p.end) end = p.end
+                val sentence = text.substring(start, end)
+                val trimmed = sentence.trim()
+                val segments = if (s.ttsSmart) DialogSplitter.split(text, start, end, quoteState, closer) else listOf(Segment(start, end, false))
+                for (seg in segments) {
+                    val raw = text.substring(seg.start, seg.end).replace('\u200B', ' ').replace('\uFFFC', ' ')
+                    if (raw.isBlank()) continue
+                    var pitch = s.ttsPitch
+                    var rate = s.ttsRate
+                    if (s.ttsSmart) {
+                        if (p.heading) rate *= 0.88f
+                        if (seg.dialog) pitch *= s.ttsDialogPitch.takeIf { s.ttsDialogVoice.isBlank() } ?: 1f
+                        val tail = raw.trimEnd().lastOrNull { !it.isWhitespace() && it !in "«»„“”\"‚‘)" }
+                        if (tail == '?') pitch *= 1.05f
+                        if (tail == '!') { pitch *= 1.04f; rate *= 1.05f }
+                    }
+                    apply(if (seg.dialog && s.ttsSmart) dialogVoice else narrator, pitch, rate)
+                    val id = "s_${chapter}_${n++}"
+                    sentences[id] = SpokenRange(chapter, seg.start, seg.end)
+                    tts.speak(raw, TextToSpeech.QUEUE_ADD, null, id)
+                    lastId = id
+                    if (s.ttsSmart && raw.trimEnd().endsWith("…")) tts.playSilentUtterance(350, TextToSpeech.QUEUE_ADD, "p_${n}")
+                }
+                if (s.ttsSmart && trimmed.isNotEmpty() && end < p.end) tts.playSilentUtterance(120, TextToSpeech.QUEUE_ADD, "sp_$n")
+                start = end
             }
-            start = end
-            end = it.next()
+            if (s.ttsSmart) tts.playSilentUtterance(if (p.heading) 800 else 420, TextToSpeech.QUEUE_ADD, "pp_$n")
         }
         if (n == 0) onChapterDone?.invoke(chapter)
         _speaking.value = true
@@ -112,6 +248,7 @@ class TtsController(context: Context) {
 
     fun stop() {
         tts.stop()
+        cloud.stop()
         _speaking.value = false
         _range.value = null
     }
@@ -123,8 +260,163 @@ class TtsController(context: Context) {
     fun shutdown() {
         tts.stop()
         tts.shutdown()
+        cloud.stop()
     }
 }
+
+/**
+ * KI-Stimme über die OpenAI-Sprach-API (gpt-4o-mini-tts): versteht den Text und betont ihn
+ * wie ein Hörbuchsprecher. Liest absatzweise, lädt die nächsten Absätze im Voraus.
+ */
+class CloudNarrator(private val context: Context) {
+    var onRange: ((SpokenRange) -> Unit)? = null
+    var onChapterDone: ((Int) -> Unit)? = null
+    var onError: ((String) -> Unit)? = null
+
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+    private var job: kotlinx.coroutines.Job? = null
+    private var player: android.media.MediaPlayer? = null
+
+    private data class Chunk(val start: Int, val end: Int, val text: String)
+
+    private fun chunks(text: String, from: Int, paragraphs: List<NarrationParagraph>): List<Chunk> {
+        val out = ArrayList<Chunk>()
+        var curStart = -1
+        var curEnd = -1
+        val sb = StringBuilder()
+        for (p in paragraphs.filter { it.end > from }.ifEmpty { listOf(NarrationParagraph(from, text.length, false)) }) {
+            val s = maxOf(p.start, from)
+            val t = text.substring(s, p.end).replace('\u200B', ' ').replace('\uFFFC', ' ').trim()
+            if (t.isEmpty()) continue
+            if (sb.isNotEmpty() && sb.length + t.length > 900) {
+                out += Chunk(curStart, curEnd, sb.toString()); sb.setLength(0); curStart = -1
+            }
+            if (curStart < 0) curStart = s
+            if (sb.isNotEmpty()) sb.append("\n\n")
+            sb.append(t)
+            curEnd = p.end
+            // sehr lange Absätze an Satzgrenzen teilen (API-Grenze ~4000 Zeichen)
+            if (sb.length > 3500) { out += Chunk(curStart, curEnd, sb.toString().take(3900)); sb.setLength(0); curStart = -1 }
+        }
+        if (sb.isNotEmpty()) out += Chunk(curStart, curEnd, sb.toString())
+        return out
+    }
+
+    private fun request(apiKey: String, voice: String, style: String, input: String): java.io.File {
+        val url = java.net.URL("https://api.openai.com/v1/audio/speech")
+        val conn = url.openConnection() as java.net.HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 15000
+            conn.readTimeout = 60000
+            conn.doOutput = true
+            conn.setRequestProperty("Authorization", "Bearer $apiKey")
+            conn.setRequestProperty("Content-Type", "application/json")
+            val body = org.json.JSONObject()
+                .put("model", "gpt-4o-mini-tts")
+                .put("voice", voice)
+                .put("input", input)
+                .put("instructions", style)
+                .put("response_format", "mp3")
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                val err = conn.errorStream?.use { String(it.readBytes()) } ?: ""
+                val msg = runCatching { org.json.JSONObject(err).getJSONObject("error").getString("message") }.getOrNull()
+                throw IllegalStateException(if (code == 401) "API-Schlüssel ungültig" else "KI-Stimme nicht erreichbar ($code${msg?.let { ": $it" } ?: ""})")
+            }
+            val dir = java.io.File(context.cacheDir, "narration").apply { mkdirs() }
+            val f = java.io.File(dir, "n_${System.nanoTime()}.mp3")
+            conn.inputStream.use { i -> f.outputStream().use { i.copyTo(it) } }
+            return f
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private suspend fun play(file: java.io.File) = kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
+        val mp = android.media.MediaPlayer()
+        player = mp
+        try {
+            mp.setDataSource(file.absolutePath)
+            mp.setOnCompletionListener { file.delete(); if (cont.isActive) cont.resumeWith(Result.success(Unit)) }
+            mp.setOnErrorListener { _, _, _ -> if (cont.isActive) cont.resumeWith(Result.success(Unit)); true }
+            mp.prepare()
+            mp.start()
+        } catch (e: Exception) {
+            if (cont.isActive) cont.resumeWith(Result.failure(e))
+        }
+        cont.invokeOnCancellation { runCatching { mp.stop(); mp.release() } }
+    }
+
+    fun speak(chapter: Int, text: String, from: Int, paragraphs: List<NarrationParagraph>, apiKey: String, voice: String, style: String) {
+        stop()
+        val list = chunks(text, from, paragraphs)
+        job = scope.launch {
+            try {
+                val io = kotlinx.coroutines.Dispatchers.IO
+                // bis zu zwei Absätze im Voraus laden
+                val pending = ArrayDeque<kotlinx.coroutines.Deferred<java.io.File>>()
+                var next = 0
+                fun fill() { while (pending.size < 3 && next < list.size) { val c = list[next++]; pending.addLast(async(io) { request(apiKey, voice, style, c.text) }) } }
+                fill()
+                var i = 0
+                while (pending.isNotEmpty()) {
+                    val file = pending.removeFirst().await()
+                    fill()
+                    val c = list[i++]
+                    onRange?.invoke(SpokenRange(chapter, c.start, c.end))
+                    play(file)
+                    runCatching { player?.release() }
+                }
+                onChapterDone?.invoke(chapter)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onError?.invoke(e.message ?: "KI-Stimme konnte nicht geladen werden")
+            }
+        }
+    }
+
+    fun preview(apiKey: String, voice: String, style: String) {
+        stop()
+        job = scope.launch {
+            try {
+                val f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    request(apiKey, voice, style, "»Was für ein gemütlicher Abend«, sagte sie leise und zog die Decke enger um sich. Draußen prasselte der Regen gegen das Fenster.")
+                }
+                play(f)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onError?.invoke(e.message ?: "Hörprobe fehlgeschlagen")
+            }
+        }
+    }
+
+    fun stop() {
+        job?.cancel()
+        job = null
+        runCatching { player?.stop() }
+        runCatching { player?.release() }
+        player = null
+    }
+}
+
+/** Verfügbare KI-Stimmen mit kurzer Beschreibung. */
+val AiVoices = listOf(
+    "coral" to "Coral – warm, weiblich",
+    "nova" to "Nova – hell, freundlich, weiblich",
+    "shimmer" to "Shimmer – sanft, weiblich",
+    "sage" to "Sage – ruhig, ausgeglichen",
+    "fable" to "Fable – erzählerisch",
+    "ballad" to "Ballad – weich, männlich",
+    "ash" to "Ash – warm, männlich",
+    "onyx" to "Onyx – tief, männlich",
+    "echo" to "Echo – klar, männlich",
+    "verse" to "Verse – ausdrucksstark",
+    "alloy" to "Alloy – neutral",
+)
 
 // ------------------------------------------------------------------------------------------------
 // Ambiente-Klänge (prozedural erzeugt)

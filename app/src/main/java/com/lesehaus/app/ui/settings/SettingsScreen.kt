@@ -88,9 +88,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 AppThemeMode.entries.forEach { m -> FilterChip(selected = s.themeMode == m, onClick = { app.settings.updateApp { it.copy(themeMode = m) } }, label = { Text(m.label) }) }
             }
-            SwitchRow("Lebendige Zimmer", "Kaminfeuer, Regen, Kerzen und Katze bewegen sich", s.roomAnimations) { v -> app.settings.updateApp { it.copy(roomAnimations = v) } }
+            SwitchRow("Lebendige Zimmer", "Kaminfeuer, Regen, Kerzen, Tiere und Uhren bewegen sich", s.roomAnimations) { v -> app.settings.updateApp { it.copy(roomAnimations = v) } }
             SwitchRow("Buch-Öffnen-Animation", "Das Buch wird aus dem Regal gezogen und aufgeschlagen", s.bookAnimations) { v -> app.settings.updateApp { it.copy(bookAnimations = v) } }
             SwitchRow("Raumklang beim Betreten", "Jedes Zimmer spielt leise seinen Klang", s.roomSounds) { v -> app.settings.updateApp { it.copy(roomSounds = v) } }
+            SwitchRow("Zimmerklang beim Lesen", "Ohne eigene Klangkulisse spielt leise der Klang des Zimmers, aus dem das Buch stammt", s.roomAmbienceInReader) { v -> app.settings.updateApp { it.copy(roomAmbienceInReader = v) } }
 
             Section("Bibliothek")
             SwitchRow("Regale automatisch aktualisieren", "Beim Betreten eines Zimmers nach neuen Büchern suchen", s.autoScan) { v -> app.settings.updateApp { it.copy(autoScan = v) } }
@@ -128,11 +129,11 @@ fun SettingsScreen(onBack: () -> Unit) {
             Text("Zimmer, Regale, Lesefortschritt, Lesezeichen, Notizen, Markierungen und Lieblingsstellen als Datei sichern oder wiederherstellen.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { exporter.launch("Lesehaus-Sicherung-${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}.json") }) { Text("Sichern") }
+                OutlinedButton(onClick = { exporter.launch("BennysLibrary-Sicherung-${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}.json") }) { Text("Sichern") }
                 OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("Wiederherstellen") }
             }
 
-            Section("Über Lesehaus")
+            Section("Über Benny's Library")
             Text("Version 1.0 · Unterstützte Formate: " + SupportedFormats.values.distinct().joinToString(", "), style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(6.dp))
             Text(

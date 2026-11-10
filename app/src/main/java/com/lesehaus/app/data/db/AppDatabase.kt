@@ -41,6 +41,27 @@ interface RoomDao {
 
     @Query("SELECT COALESCE(MAX(sortIndex), 0) FROM rooms")
     suspend fun maxSort(): Int
+
+    @Query("SELECT * FROM room_items WHERE roomId = :roomId ORDER BY z, id")
+    fun observeItems(roomId: Long): Flow<List<RoomItem>>
+
+    @Query("SELECT * FROM room_items WHERE roomId = :roomId ORDER BY z, id")
+    suspend fun items(roomId: Long): List<RoomItem>
+
+    @Query("SELECT * FROM room_items ORDER BY roomId, z, id")
+    fun observeAllItems(): Flow<List<RoomItem>>
+
+    @Insert
+    suspend fun insertItem(item: RoomItem): Long
+
+    @Insert
+    suspend fun insertItems(items: List<RoomItem>)
+
+    @Update
+    suspend fun updateItem(item: RoomItem)
+
+    @Delete
+    suspend fun deleteItem(item: RoomItem)
 }
 
 @Dao
@@ -217,9 +238,26 @@ interface StatsDao {
     suspend fun pagesSince(bookId: Long, since: Long): Int
 }
 
+val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE rooms ADD COLUMN doorStyle TEXT NOT NULL DEFAULT 'PANEL'")
+        db.execSQL("ALTER TABLE rooms ADD COLUMN doorColor INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE rooms ADD COLUMN roomWidth REAL NOT NULL DEFAULT 1.5")
+        db.execSQL("ALTER TABLE rooms ADD COLUMN decorated INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE shelves ADD COLUMN style TEXT NOT NULL DEFAULT 'TALL'")
+        db.execSQL("ALTER TABLE shelves ADD COLUMN arrangement TEXT NOT NULL DEFAULT 'ALPHA'")
+        db.execSQL("ALTER TABLE shelves ADD COLUMN posX REAL NOT NULL DEFAULT -1.0")
+        db.execSQL("ALTER TABLE shelves ADD COLUMN posY REAL NOT NULL DEFAULT 0.75")
+        db.execSQL("ALTER TABLE shelves ADD COLUMN scale REAL NOT NULL DEFAULT 1.0")
+        db.execSQL("ALTER TABLE shelves ADD COLUMN decor INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `room_items` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `roomId` INTEGER NOT NULL, `type` TEXT NOT NULL, `x` REAL NOT NULL, `y` REAL NOT NULL, `scale` REAL NOT NULL, `flip` INTEGER NOT NULL, `z` INTEGER NOT NULL, `color` INTEGER NOT NULL, `variant` INTEGER NOT NULL, `imagePath` TEXT, `label` TEXT, FOREIGN KEY(`roomId`) REFERENCES `rooms`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_room_items_roomId` ON `room_items` (`roomId`)")
+    }
+}
+
 @Database(
-    entities = [ReadingRoom::class, Shelf::class, Book::class, ShelfBook::class, Bookmark::class, Annotation::class, Favorite::class, ReadingSession::class],
-    version = 1,
+    entities = [ReadingRoom::class, Shelf::class, RoomItem::class, Book::class, ShelfBook::class, Bookmark::class, Annotation::class, Favorite::class, ReadingSession::class],
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -232,6 +270,7 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "lesehaus.db")
+                .addMigrations(MIGRATION_1_2)
                 .fallbackToDestructiveMigration()
                 .build()
     }

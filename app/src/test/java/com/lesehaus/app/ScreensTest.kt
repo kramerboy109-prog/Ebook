@@ -6,6 +6,9 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
@@ -139,12 +142,36 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         compose.setContent { LesehausTheme(AppThemeMode.DARK) { RoomScreen(roomId, {}, {}, {}, {}) } }
         waitForText("Mein Regal")
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage("screens/03_room_covers.png")
-        runBlocking { app.db.shelves().shelf(shelfId)?.let { app.db.shelves().update(it.copy(displayMode = ShelfDisplay.SPINES.name)) } }
+        compose.onRoot().captureRoboImage("screens/03_room.png")
+        // Nahansicht des Regals über den Schnellzugriff
+        compose.onNodeWithText("Mein Regal ·", substring = true).performClick()
         compose.waitForIdle()
-        Thread.sleep(500)
+        compose.mainClock.advanceTimeBy(800)
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage("screens/04_room_spines.png")
+        compose.onRoot().captureRoboImage("screens/04_bookcase_closeup.png")
+    }
+
+    @Test
+    fun roomArrangements() {
+        runBlocking {
+            app.db.shelves().shelf(shelfId)?.let { app.db.shelves().update(it.copy(arrangement = "MIXED", style = "ARCH")) }
+        }
+        compose.setContent { LesehausTheme(AppThemeMode.DARK) { RoomScreen(roomId, {}, {}, {}, {}) } }
+        waitForText("Mein Regal")
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage("screens/04b_room_arch_mixed.png")
+        compose.onNodeWithContentDescription("Übersicht").performClick()
+        compose.mainClock.advanceTimeBy(1000)
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage("screens/04c_room_overview.png")
+        compose.onNodeWithContentDescription("Hineingehen").performClick()
+        compose.mainClock.advanceTimeBy(800)
+        compose.onNodeWithContentDescription("Einrichten").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Hinzufügen", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(800)
+        captureScreenRoboImage("screens/04d_room_catalog.png")
     }
 
     @Test
@@ -178,6 +205,14 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         compose.onRoot().performTouchInput { longClick(androidx.compose.ui.geometry.Offset(width * 0.5f, height * 0.3f)) }
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("screens/09_reader_selection.png")
+        compose.onNodeWithContentDescription("Schließen").performClick()
+        compose.onRoot().performTouchInput { click(center) }
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Mehr").performClick()
+        compose.onNodeWithText("Vorlesestimme").performClick()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(800)
+        captureScreenRoboImage("screens/09b_voice_sheet.png")
     }
 
     @Test

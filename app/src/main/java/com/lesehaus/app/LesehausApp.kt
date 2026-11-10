@@ -44,6 +44,9 @@ class AppContainer(val context: Context) {
     val covers = CoverService(context)
     val scanner = ShelfScanner(context, db, covers)
 
+    /** Zimmer, aus dem zuletzt ein Buch geöffnet wurde (für den Zimmerklang beim Lesen). */
+    @Volatile var currentRoomId: Long = -1L
+
     private val contentCache = LruCache<String, BookContent>(3)
     private val parseMutex = Mutex()
 
@@ -74,12 +77,65 @@ class AppContainer(val context: Context) {
                 fileTypes = DefaultFileTypes,
             )
         )
+        ensureDecorated(id)
         return id
+    }
+
+    /** Legt beim ersten Betreten die frei verschiebbare Einrichtung an (aus der Zimmervorlage). */
+    private val decorMutex = Mutex()
+
+    suspend fun ensureDecorated(roomId: Long): Unit = decorMutex.withLock { ensureDecoratedLocked(roomId) }
+
+    private suspend fun ensureDecoratedLocked(roomId: Long) {
+        val room = db.rooms().room(roomId) ?: return
+        val shelves = db.shelves().shelves(roomId)
+        if (room.decorated) {
+            // neue, noch nicht platzierte Regale an eine freie Stelle stellen
+            val unplaced = shelves.filter { it.posX < 0f }
+            if (unplaced.isEmpty()) return
+            val items = db.rooms().items(roomId)
+            val occupied = ArrayList<Pair<Float, Float>>()
+            items.forEach { i ->
+                val t = com.lesehaus.app.ui.room.itemTypeOf(i.type) ?: return@forEach
+                if (t.layer == com.lesehaus.app.ui.room.ItemLayer.FLOOR && t.h > 0.2f) {
+                    val c = i.x * room.roomWidth
+                    occupied += (c - t.w * i.scale / 2 to c + t.w * i.scale / 2)
+                }
+            }
+            shelves.filter { it.posX >= 0f }.forEach { s ->
+                val st = com.lesehaus.app.data.enumOr(s.style, com.lesehaus.app.ui.shelf.BookcaseStyle.TALL)
+                val c = s.posX * room.roomWidth
+                occupied += (c - st.w * s.scale / 2 to c + st.w * s.scale / 2)
+            }
+            unplaced.forEach { s ->
+                val st = com.lesehaus.app.data.enumOr(s.style, com.lesehaus.app.ui.shelf.BookcaseStyle.TALL)
+                val x = com.lesehaus.app.ui.room.freeSpot(st.w * s.scale + 0.05f, room.roomWidth, occupied)
+                occupied += (x * room.roomWidth - st.w / 2 to x * room.roomWidth + st.w / 2)
+                db.shelves().update(s.copy(posX = x, posY = if (st.onWall) 0.5f else com.lesehaus.app.ui.room.FLOOR_Y + 0.04f))
+            }
+            return
+        }
+        val setup = com.lesehaus.app.ui.room.defaultSetup(room, shelves)
+        db.rooms().insertItems(setup.items)
+        setup.shelves.forEach { db.shelves().update(it) }
+        db.rooms().update(room.copy(decorated = true, roomWidth = setup.roomWidth))
+    }
+
+    /** Einrichtung auf die Vorlage zurücksetzen. */
+    suspend fun resetDecoration(roomId: Long) {
+        val room = db.rooms().room(roomId) ?: return
+        db.rooms().items(roomId).forEach { db.rooms().deleteItem(it) }
+        db.shelves().shelves(roomId).forEach { db.shelves().update(it.copy(posX = -1f)) }
+        db.rooms().update(room.copy(decorated = false))
+        ensureDecorated(roomId)
+        Unit
     }
 
     suspend fun duplicateRoom(room: ReadingRoom): Long {
         val sort = db.rooms().maxSort() + 1
-        return db.rooms().insert(room.copy(id = 0, name = room.name + " (Kopie)", sortIndex = sort, createdAt = System.currentTimeMillis()))
+        val id = db.rooms().insert(room.copy(id = 0, name = room.name + " (Kopie)", sortIndex = sort, createdAt = System.currentTimeMillis()))
+        db.rooms().insertItems(db.rooms().items(room.id).map { it.copy(id = 0, roomId = id) })
+        return id
     }
 
     fun scanShelf(shelf: Shelf) {

@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -128,6 +129,8 @@ fun HomeScreen(
         }
     }.collectAsState(initial = emptyMap())
     val days by app.db.stats().observeDays().collectAsState(initial = emptyList())
+    val allItems by app.db.rooms().observeAllItems().collectAsState(initial = emptyList())
+    val itemsByRoom = remember(allItems) { allItems.groupBy { it.roomId } }
     val appSettings by app.settings.app.collectAsState()
     val reader by app.settings.reader.collectAsState()
     var addRoom by remember { mutableStateOf(false) }
@@ -138,29 +141,55 @@ fun HomeScreen(
         Scaffold(bottomBar = bottomBar) { pad ->
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = pad.calculateBottomPadding() + 24.dp)) {
                 item {
-                    // Kopfbereich mit warmem Verlauf
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f), MaterialTheme.colorScheme.background)))
-                            .windowInsetsPadding(WindowInsets.statusBars)
-                            .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 8.dp)
-                    ) {
-                        Column(Modifier.padding(end = 100.dp)) {
-                            Text(greeting(), style = MaterialTheme.typography.headlineMedium)
-                            val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                            val todayMin = (days.firstOrNull { it.day == today }?.total ?: 0L) / 60_000
-                            Text(
-                                if (todayMin > 0) "Heute schon $todayMin von ${appSettings.dailyGoalMinutes} Minuten gelesen."
-                                else "Willkommen zurück in deinem Lesehaus.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    // Der Flur mit den Zimmertüren
+                    val list = rooms.orEmpty()
+                    val pager = rememberPagerState { list.size + 1 }
+                    Box(Modifier.fillMaxWidth().height(640.dp)) {
+                        Hallway(
+                            rooms = list,
+                            itemsByRoom = itemsByRoom,
+                            pager = pager,
+                            animate = appSettings.roomAnimations,
+                            modifier = Modifier.fillMaxSize().padding(top = 0.dp),
+                            onEnter = { onOpenRoom(it.id) },
+                            onEdit = { onEditRoom(it.id) },
+                            onAddRoom = { addRoom = true },
+                        )
+                        // Titel über dem Flur
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 18.dp)
+                        ) {
+                            Column(Modifier.padding(end = 96.dp)) {
+                                Text(
+                                    "Benny's Library",
+                                    style = TextStyle(fontFamily = Fonts.Playfair, fontStyle = FontStyle.Italic, fontWeight = FontWeight.SemiBold, fontSize = 30.sp, color = Color(0xFFF6E7C4), shadow = Shadow(Color.Black, blurRadius = 10f)),
+                                )
+                                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                                val todayMin = (days.firstOrNull { it.day == today }?.total ?: 0L) / 60_000
+                                Text(
+                                    greeting() + " · " + if (todayMin > 0) "heute $todayMin von ${appSettings.dailyGoalMinutes} Min. gelesen" else "Wohin möchtest du heute?",
+                                    style = TextStyle(fontFamily = Fonts.Lora, fontSize = 14.sp, color = Color(0xFFEBD9B4), shadow = Shadow(Color.Black, blurRadius = 6f)),
+                                )
+                            }
+                            Row(Modifier.align(Alignment.TopEnd)) {
+                                val ic = androidx.compose.material3.IconButtonDefaults.iconButtonColors(contentColor = Color(0xFFF6E7C4))
+                                IconButton(onClick = onLibrary, colors = ic) { Icon(Icons.AutoMirrored.Outlined.LibraryBooks, "Alle Bücher") }
+                                IconButton(onClick = onSettings, colors = ic) { Icon(Icons.Outlined.Settings, "Einstellungen") }
+                            }
                         }
-                        Row(Modifier.align(Alignment.TopEnd)) {
-                            IconButton(onClick = onLibrary) { Icon(Icons.AutoMirrored.Outlined.LibraryBooks, "Alle Bücher") }
-                            IconButton(onClick = onSettings) { Icon(Icons.Outlined.Settings, "Einstellungen") }
-                        }
+                        val cur = list.getOrNull(pager.currentPage)
+                        Text(
+                            if (cur != null) {
+                                val (sh, bk) = stats[cur.id] ?: (0 to 0)
+                                "$sh ${if (sh == 1) "Regal" else "Regale"} · $bk ${if (bk == 1) "Buch" else "Bücher"} · Tür antippen zum Eintreten"
+                            } else "Wische zu den Türen →",
+                            style = TextStyle(fontFamily = Fonts.Nunito, fontSize = 12.sp, color = Color(0xFFF2E3C6), shadow = Shadow(Color.Black, blurRadius = 6f)),
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
+                        )
                     }
                 }
                 if (recent.isNotEmpty()) {
@@ -210,28 +239,6 @@ fun HomeScreen(
                                 Text(fav.text, style = QuoteStyle.copy(color = MaterialTheme.colorScheme.onSurface), maxLines = 7, overflow = TextOverflow.Ellipsis)
                                 Spacer(Modifier.height(8.dp))
                                 Text("— ${listOf(fav.bookAuthor, fav.bookTitle).filter { it.isNotBlank() }.joinToString(", ")}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-                item { SectionTitle("Deine Zimmer") }
-                val list = rooms
-                if (list == null) item { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
-                else {
-                    items(list, key = { it.id }) { r ->
-                        RoomCard(r, stats[r.id], animate = appSettings.roomAnimations, onClick = { onOpenRoom(r.id) }, onLong = { onEditRoom(r.id) })
-                    }
-                    item {
-                        Surface(
-                            onClick = { addRoom = true },
-                            shape = RoundedCornerShape(20.dp),
-                            color = Color.Transparent,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp)),
-                        ) {
-                            Row(Modifier.padding(22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                                Icon(Icons.Outlined.Add, null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Neues Zimmer einrichten", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
@@ -373,7 +380,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 .padding(horizontal = 24.dp)
                 .padding(top = 300.dp, bottom = 40.dp),
         ) {
-            Text("Willkommen im Lesehaus", style = TextStyle(fontFamily = Fonts.Playfair, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, color = Color(0xFFF6E7C4), shadow = Shadow(Color.Black, blurRadius = 10f)))
+            Text("Willkommen in Benny's Library", style = TextStyle(fontFamily = Fonts.Playfair, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, color = Color(0xFFF6E7C4), shadow = Shadow(Color.Black, blurRadius = 10f)))
             Spacer(Modifier.height(10.dp))
             Text(
                 "Richte dir gemütliche Zimmer ein, stelle Bücherregale auf und lass sie deine Bücher aus beliebigen Ordnern einsortieren. Welche Zimmer möchtest du für den Anfang?",

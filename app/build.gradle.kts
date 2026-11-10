@@ -11,7 +11,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.lesehaus.app"
+        applicationId = "com.bennys.library"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

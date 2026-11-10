@@ -223,8 +223,17 @@ fun ReaderScreen(
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
     }
-    LaunchedEffect(s.ambientSound, s.ambientVolume) {
-        vm.ambient.play(s.ambientSound, s.ambientVolume)
+    LaunchedEffect(s.ambientSound, s.ambientVolume, appSettings.roomAmbienceInReader) {
+        // Ohne eigene Klangkulisse spielt leise der Klang des Zimmers, aus dem das Buch stammt
+        val roomSound = if (s.ambientSound == com.lesehaus.app.data.AmbientSound.NONE && appSettings.roomAmbienceInReader && container.currentRoomId >= 0)
+            container.db.rooms().room(container.currentRoomId)?.let { com.lesehaus.app.data.enumOr(it.ambientSound, com.lesehaus.app.data.AmbientSound.NONE) }
+        else null
+        if (roomSound != null && roomSound != com.lesehaus.app.data.AmbientSound.NONE) vm.ambient.play(roomSound, s.ambientVolume * 0.6f)
+        else vm.ambient.play(s.ambientSound, s.ambientVolume)
+    }
+    val ttsError by vm.tts.error.collectAsState()
+    LaunchedEffect(ttsError) {
+        ttsError?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show(); vm.tts.clearError() }
     }
     DisposableEffect(Unit) { onDispose { vm.ambient.stop(); vm.tts.stop() } }
     LaunchedEffect(vm.flash) {
@@ -374,6 +383,7 @@ fun ReaderScreen(
                 onNotes = { sheet = ReaderSheet.NOTES },
                 onInfo = { sheet = ReaderSheet.INFO },
                 onFinished = { vm.setBookStatus("FINISHED") },
+                onVoice = { sheet = ReaderSheet.VOICE },
                 onPdfOriginal = onOpenPdfOriginal,
             )
         }
@@ -394,7 +404,7 @@ fun ReaderScreen(
             )
         }
         if (ttsSpeaking && !controlsVisible && vm.selection == null) {
-            TtsMiniPlayer(vm, Modifier.align(Alignment.BottomCenter))
+            TtsMiniPlayer(vm, Modifier.align(Alignment.BottomCenter), onVoice = { sheet = ReaderSheet.VOICE })
         }
         // Auswahl-Werkzeuge
         vm.selection?.let { sel ->
@@ -448,6 +458,7 @@ fun ReaderScreen(
             controlsVisible = false
         })
         ReaderSheet.INFO -> BookInfoSheet(vm, onDismiss = { sheet = null })
+        ReaderSheet.VOICE -> VoiceSheet(container, s, vm, book?.language ?: "", onDismiss = { sheet = null })
         null -> Unit
     }
     favoriteDialog?.let { (sel, kind) ->
@@ -478,7 +489,7 @@ fun ReaderScreen(
     }
 }
 
-enum class ReaderSheet { DISPLAY, THEME, AMBIENT, TOC, NOTES, SEARCH, INFO }
+enum class ReaderSheet { DISPLAY, THEME, AMBIENT, TOC, NOTES, SEARCH, INFO, VOICE }
 
 sealed interface NoteTarget {
     data class New(val selection: Selection) : NoteTarget

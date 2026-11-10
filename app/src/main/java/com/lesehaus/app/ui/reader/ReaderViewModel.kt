@@ -132,7 +132,7 @@ class ReaderViewModel(
                 val next = ch + 1
                 if (next < chapters.size) {
                     goTo(next, 0)
-                    tts.speak(next, chapters[next].text, 0)
+                    speakChapter(next, 0)
                 } else tts.stop()
             }
         }
@@ -340,17 +340,22 @@ class ReaderViewModel(
     fun clearSearch() { searchHits = emptyList(); activeSearch = null }
 
     // ---------------- Vorlesen ----------------
+    private fun paragraphsOf(ch: PreparedChapter): List<NarrationParagraph> =
+        ch.blocks.filter { it.spacerEm == 0f && it.kind != com.lesehaus.app.data.formats.BlockKind.IMAGE && it.kind != com.lesehaus.app.data.formats.BlockKind.RULE }
+            .map { NarrationParagraph(it.start, it.end, it.kind == com.lesehaus.app.data.formats.BlockKind.H1 || it.kind == com.lesehaus.app.data.formats.BlockKind.H2 || it.kind == com.lesehaus.app.data.formats.BlockKind.H3) }
+
+    private fun speakChapter(chapter: Int, from: Int) {
+        val ch = chapters.getOrNull(chapter) ?: return
+        tts.speak(chapter, ch.text, from, paragraphsOf(ch), settings.value, app.settings.app.value.aiKey)
+    }
+
     fun startTts() {
         val p = pages.getOrNull(currentPage) ?: return
-        val s = settings.value
-        tts.setRate(s.ttsRate, s.ttsPitch)
-        tts.speak(p.chapter, chapters[p.chapter].text, p.start)
+        speakChapter(p.chapter, p.start)
     }
 
     fun startTtsAt(sel: Selection) {
-        val s = settings.value
-        tts.setRate(s.ttsRate, s.ttsPitch)
-        tts.speak(sel.chapter, chapters[sel.chapter].text, sel.start)
+        speakChapter(sel.chapter, sel.start)
         selection = null
     }
 

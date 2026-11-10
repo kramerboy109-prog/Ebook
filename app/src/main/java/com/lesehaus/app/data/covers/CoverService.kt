@@ -62,7 +62,7 @@ class CoverService(private val context: Context) {
             conn.connectTimeout = 8000
             conn.readTimeout = 12000
             conn.instanceFollowRedirects = true
-            conn.setRequestProperty("User-Agent", "Lesehaus-Android/1.0")
+            conn.setRequestProperty("User-Agent", "BennysLibrary-Android/1.0")
             if (conn.responseCode !in 200..299) null else conn.inputStream.use { it.readBytes() }
         } catch (e: Exception) {
             null

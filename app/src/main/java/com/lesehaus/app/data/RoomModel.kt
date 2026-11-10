@@ -192,3 +192,17 @@ object RoomPresets {
 
 inline fun <reified T : Enum<T>> enumOr(value: String?, default: T): T =
     runCatching { enumValueOf<T>(value ?: "") }.getOrDefault(default)
+
+/** Türstile im Flur. */
+enum class DoorStyle(val label: String) {
+    PANEL("Kassettentür"),
+    ARCH("Rundbogentür"),
+    GLASS("Glastür"),
+    DOUBLE("Flügeltür"),
+    COTTAGE("Landhaustür"),
+    BARN("Scheunentor"),
+}
+
+val DoorPalette: List<Int> = listOf(
+    0, 0xFF6B4630, 0xFF3F271A, 0xFF8E3D31, 0xFF2F4A3F, 0xFF34465E, 0xFFE9E3D8, 0xFF5E3A6E, 0xFF9C6B30, 0xFF1F2F4A,
+).map { it.toInt() }

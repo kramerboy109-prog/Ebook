@@ -20,7 +20,7 @@ object Backup {
         val books = db.books().all()
         val uriOf = books.associate { it.id to it.uri }
         val root = JSONObject()
-        root.put("app", "Lesehaus").put("version", 1).put("created", System.currentTimeMillis())
+        root.put("app", "BennysLibrary").put("version", 1).put("created", System.currentTimeMillis())
         root.put("rooms", JSONArray().apply {
             db.rooms().rooms().forEach { r ->
                 put(JSONObject().apply {
@@ -69,7 +69,7 @@ object Backup {
     suspend fun import(app: AppContainer, json: String): String {
         val db = app.db
         val root = JSONObject(json)
-        require(root.optString("app") == "Lesehaus") { "Keine Lesehaus-Sicherung" }
+        require(root.optString("app") in setOf("BennysLibrary", "Lesehaus")) { "Keine Sicherung von Benny's Library" }
         val roomMap = HashMap<Long, Long>()
         root.optJSONArray("rooms")?.let { arr ->
             for (i in 0 until arr.length()) {

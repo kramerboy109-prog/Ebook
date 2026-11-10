@@ -161,6 +161,7 @@ fun FavoritesScreen(
                     onClick = { onReread(f.id, collection, false) },
                     onOpen = { onOpenInBook(f) },
                     onShare = { shareQuote(context, f.text, f.bookTitle, f.bookAuthor) },
+                    onShareImage = { shareQuoteImage(context, f.text, f.bookTitle, f.bookAuthor, if (isSystemInDarkThemeSafe(context)) QuoteCardStyle.FIRELIGHT else QuoteCardStyle.PAPER) },
                     onMove = { moveTarget = f },
                     onDelete = { scope.launch { app.db.annotations().deleteFavorite(f) } },
                 )
@@ -187,7 +188,7 @@ fun FavoritesScreen(
 }
 
 @Composable
-private fun FavoriteCard(f: Favorite, onClick: () -> Unit, onOpen: () -> Unit, onShare: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
+private fun FavoriteCard(f: Favorite, onClick: () -> Unit, onOpen: () -> Unit, onShare: () -> Unit, onShareImage: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Card(
         onClick = onClick,
@@ -209,7 +210,8 @@ private fun FavoriteCard(f: Favorite, onClick: () -> Unit, onOpen: () -> Unit, o
                     IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Mehr") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("Im Buch öffnen") }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.MenuBook, null) }, onClick = { menu = false; onOpen() }, enabled = f.bookId != null)
-                        DropdownMenuItem(text = { Text("Teilen") }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { menu = false; onShare() })
+                        DropdownMenuItem(text = { Text("Als Text teilen") }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { menu = false; onShare() })
+                        DropdownMenuItem(text = { Text("Als Bildkarte teilen") }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { menu = false; onShareImage() })
                         DropdownMenuItem(text = { Text("Sammlung ändern") }, onClick = { menu = false; onMove() })
                         DropdownMenuItem(text = { Text("Löschen") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, onClick = { menu = false; onDelete() })
                     }
@@ -299,7 +301,16 @@ fun RereadScreen(startId: Long, collection: String?, shuffle: Boolean, onBack: (
             IconButton(onClick = onBack, colors = iconColors) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück") }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { auto = !auto }, colors = iconColors) { Icon(if (auto) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (auto) "Automatik aus" else "Automatisch weiterblättern") }
-            IconButton(onClick = { list.getOrNull(pager.currentPage)?.let { shareQuote(context, it.text, it.bookTitle, it.bookAuthor) } }, colors = iconColors) { Icon(Icons.Outlined.Share, "Teilen") }
+            var shareMenu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { shareMenu = true }, colors = iconColors) { Icon(Icons.Outlined.Share, "Teilen") }
+                DropdownMenu(shareMenu, { shareMenu = false }) {
+                    DropdownMenuItem(text = { Text("Als Text teilen") }, onClick = { shareMenu = false; list.getOrNull(pager.currentPage)?.let { shareQuote(context, it.text, it.bookTitle, it.bookAuthor) } })
+                    QuoteCardStyle.entries.forEach { st ->
+                        DropdownMenuItem(text = { Text("Als Bildkarte · ${st.label}") }, onClick = { shareMenu = false; list.getOrNull(pager.currentPage)?.let { shareQuoteImage(context, it.text, it.bookTitle, it.bookAuthor, st) } })
+                    }
+                }
+            }
             IconButton(onClick = { list.getOrNull(pager.currentPage)?.let(onOpenInBook) }, colors = iconColors) { Icon(Icons.AutoMirrored.Outlined.MenuBook, "Im Buch öffnen") }
         }
         val progress by animateFloatAsState((pager.currentPage + 1f) / list.size, label = "p")
@@ -312,3 +323,6 @@ fun RereadScreen(startId: Long, collection: String?, shuffle: Boolean, onBack: (
         }
     }
 }
+
+private fun isSystemInDarkThemeSafe(context: android.content.Context): Boolean =
+    (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES

@@ -143,7 +143,7 @@ import kotlin.math.roundToInt
 // ------------------------------------------------------------------------------------------------
 fun copyText(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("Lesehaus", text))
+    cm.setPrimaryClip(ClipData.newPlainText("Benny's Library", text))
     Toast.makeText(context, "Kopiert", Toast.LENGTH_SHORT).show()
 }
 
@@ -179,6 +179,7 @@ fun ReaderTopBar(
     onInfo: () -> Unit,
     onFinished: () -> Unit,
     onPdfOriginal: () -> Unit,
+    onVoice: () -> Unit = {},
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.97f),
@@ -205,6 +206,7 @@ fun ReaderTopBar(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Notizen & Markierungen") }, leadingIcon = { Icon(Icons.Outlined.StickyNote2, null) }, onClick = { menu = false; onNotes() })
                     DropdownMenuItem(text = { Text("Buchinfo") }, leadingIcon = { Icon(Icons.Outlined.Info, null) }, onClick = { menu = false; onInfo() })
+                    DropdownMenuItem(text = { Text("Vorlesestimme") }, leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) }, onClick = { menu = false; onVoice() })
                     DropdownMenuItem(text = { Text("Als gelesen markieren") }, leadingIcon = { Icon(Icons.Outlined.TaskAlt, null) }, onClick = { menu = false; onFinished() })
                     if (isPdf) DropdownMenuItem(text = { Text("Original-PDF-Ansicht") }, leadingIcon = { Icon(Icons.Outlined.PictureAsPdf, null) }, onClick = { menu = false; onPdfOriginal() })
                 }
@@ -291,8 +293,9 @@ private fun BarAction(icon: ImageVector, label: String, active: Boolean, onClick
 }
 
 @Composable
-fun TtsMiniPlayer(vm: ReaderViewModel, modifier: Modifier) {
+fun TtsMiniPlayer(vm: ReaderViewModel, modifier: Modifier, onVoice: () -> Unit = {}) {
     val sleepAt by vm.tts.sleepAt.collectAsState()
+    val engine by vm.tts.engineLabel.collectAsState()
     var menu by remember { mutableStateOf(false) }
     Surface(
         modifier = modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp),
@@ -303,7 +306,7 @@ fun TtsMiniPlayer(vm: ReaderViewModel, modifier: Modifier) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, modifier = Modifier.padding(start = 8.dp))
             Text(
-                if (sleepAt > 0) "Vorlesen · Schlaftimer ${SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date(sleepAt))}" else "Wird vorgelesen …",
+                if (sleepAt > 0) "Schlaftimer ${SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date(sleepAt))}" else engine.ifBlank { "Wird vorgelesen …" },
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(horizontal = 10.dp),
             )
@@ -315,6 +318,7 @@ fun TtsMiniPlayer(vm: ReaderViewModel, modifier: Modifier) {
                     }
                 }
             }
+            IconButton(onClick = onVoice) { Icon(Icons.Outlined.RecordVoiceOver, "Stimme wählen") }
             IconButton(onClick = { vm.tts.stop() }) { Icon(Icons.Filled.Stop, "Stopp") }
         }
     }
