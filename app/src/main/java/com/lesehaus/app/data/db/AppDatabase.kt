@@ -18,11 +18,17 @@ data class ShelfCount(val shelfId: Long, val count: Int)
 
 @Dao
 interface RoomDao {
-    @Query("SELECT * FROM rooms ORDER BY sortIndex, id")
+    @Query("SELECT * FROM rooms WHERE type != 'HALL' ORDER BY sortIndex, id")
     fun observeRooms(): Flow<List<ReadingRoom>>
 
-    @Query("SELECT * FROM rooms ORDER BY sortIndex, id")
+    @Query("SELECT * FROM rooms WHERE type != 'HALL' ORDER BY sortIndex, id")
     suspend fun rooms(): List<ReadingRoom>
+
+    @Query("SELECT * FROM rooms WHERE type = 'HALL' ORDER BY id LIMIT 1")
+    suspend fun hall(): ReadingRoom?
+
+    @Query("SELECT * FROM rooms WHERE type = 'HALL' ORDER BY id LIMIT 1")
+    fun observeHall(): Flow<ReadingRoom?>
 
     @Query("SELECT * FROM rooms WHERE id = :id")
     fun observeRoom(id: Long): Flow<ReadingRoom?>

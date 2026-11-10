@@ -162,7 +162,7 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("screens/04b_room_arch_mixed.png")
         // ein paar Schritte ins Zimmer und nach links gehen
-        compose.onRoot().performTouchInput { swipe(androidx.compose.ui.geometry.Offset(width * 0.5f, height * 0.55f), androidx.compose.ui.geometry.Offset(width * 0.75f, height * 0.8f), 400) }
+        compose.onRoot().performTouchInput { swipe(androidx.compose.ui.geometry.Offset(width * 0.5f, height * 0.75f), androidx.compose.ui.geometry.Offset(width * 0.62f, height * 0.62f), 500) }
         compose.mainClock.advanceTimeBy(1500)
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("screens/04c_room_walk.png")

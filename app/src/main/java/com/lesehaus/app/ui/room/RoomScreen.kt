@@ -1,5 +1,7 @@
 package com.lesehaus.app.ui.room
 
+import com.lesehaus.app.ui.home.drawHallFixtures
+
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -182,6 +184,7 @@ fun RoomScreen(
     onEditRoom: () -> Unit,
     onEditShelf: (Long) -> Unit,
     onOpenBook: (Book) -> Unit,
+    onHallStyle: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.app
@@ -254,16 +257,23 @@ fun RoomScreen(
         }
     }
 
-    val r = room ?: return
+    val dbRoom = room ?: return
+    // Der Flur wird mit seiner Form aus den Einstellungen (Breite, Länge, Türen) eingerichtet
+    val isHall = dbRoom.type == "HALL"
+    val allRooms by app.db.rooms().observeRooms().collectAsState(initial = emptyList())
+    val r = remember(dbRoom, allRooms, appSettings) {
+        if (isHall) com.lesehaus.app.ui.home.hallStyleRoom(appSettings, com.lesehaus.app.ui.home.hallLayout(allRooms, appSettings), dbRoom) else dbRoom
+    }
+    LaunchedEffect(isHall) { if (isHall) { editMode = true; showHint = false } }
     LaunchedEffect(r.id) { if (cam == null) cam = defaultCam(r) }
     val (xRange, minD, maxD) = camLimits(r)
-    fun clampCam(c: Cam) = Cam(c.x.coerceIn(xRange.start, xRange.endInclusive), c.d.coerceIn(minD, maxD))
+    fun clampCam(c: Cam) = Cam(c.x.coerceIn(xRange.start, xRange.endInclusive), c.d.coerceIn(minD, maxD), c.yaw.coerceIn(-MAX_YAW, MAX_YAW))
     fun moveCam(to: Cam, ms: Int = 520) {
         camJob?.cancel()
         val from = cam ?: defaultCam(r)
         camJob = scope.launch {
             androidx.compose.animation.core.animate(0f, 1f, animationSpec = tween(ms, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { v, _ ->
-                cam = clampCam(Cam(from.x + (to.x - from.x) * v, from.d + (to.d - from.d) * v))
+                cam = clampCam(Cam(from.x + (to.x - from.x) * v, from.d + (to.d - from.d) * v, from.yaw + (to.yaw - from.yaw) * v))
             }
         }
     }
@@ -340,17 +350,26 @@ fun RoomScreen(
                                     if (delta.getDistance() > 0f) {
                                         moved = true
                                         when (e.wall) {
-                                            Wall.BACK -> { val k = proj.cam.d / proj.f; applyMove(e, e.a + delta.x * k, e.b - delta.y * k) }
+                                            Wall.BACK -> {
+                                                val p0 = proj.backAt(prev.x, prev.y); val p1 = proj.backAt(now.x, now.y)
+                                                if (p0 != null && p1 != null) applyMove(e, e.a + (p1.first - p0.first), e.b + (p1.second - p0.second))
+                                            }
                                             Wall.LEFT, Wall.RIGHT -> {
                                                 val p0 = proj.sideAt(e.wall == Wall.RIGHT, prev.x, prev.y)
                                                 val p1 = proj.sideAt(e.wall == Wall.RIGHT, now.x, now.y)
                                                 if (p0 != null && p1 != null) applyMove(e, e.a + (p1.first - p0.first), e.b + (p1.second - p0.second))
                                             }
-                                            Wall.FLOOR, Wall.CEILING -> {
-                                                val dz = proj.dz(e.b)
-                                                val h = if (e.wall == Wall.CEILING) (1f - EYE) else (EYE - e.elev).coerceAtLeast(0.05f)
-                                                val dd = (if (e.wall == Wall.CEILING) -delta.y else delta.y) * dz * dz / (h * proj.f)
-                                                applyMove(e, e.a + delta.x * dz / proj.f, e.b + dd)
+                                            Wall.CEILING -> {
+                                                val p0 = proj.ceilingAt(prev.x, prev.y); val p1 = proj.ceilingAt(now.x, now.y)
+                                                if (p0 != null && p1 != null) applyMove(e, e.a + (p1.first - p0.first), e.b + (p1.second - p0.second))
+                                            }
+                                            Wall.FLOOR -> {
+                                                val p0 = proj.floorAt(prev.x, prev.y, e.elev); val p1 = proj.floorAt(now.x, now.y, e.elev)
+                                                if (e.decal && p0 != null && p1 != null) applyMove(e, e.a + (p1.first - p0.first), e.b + (p1.second - p0.second))
+                                                else {
+                                                    val (ddx, ddd) = proj.billboardDelta(e.a, e.b, e.elev, delta.x, delta.y)
+                                                    applyMove(e, e.a + ddx, e.b + ddd)
+                                                }
                                             }
                                         }
                                     }
@@ -382,11 +401,13 @@ fun RoomScreen(
                             val total = ch.position - down.position
                             if (!dragging && total.getDistance() > viewConfiguration.touchSlop) dragging = true
                             if (dragging) {
+                                // hoch/runter = in Blickrichtung gehen, links/rechts = umdrehen
                                 val delta = ch.position - ch.previousPosition
                                 val c = cam ?: c0
                                 val proj = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c)
-                                val k = c.d / proj.f
-                                cam = clampCam(Cam(c.x - delta.x * k, c.d - delta.y * k * 1.7f))
+                                val step = -delta.y * c.d.coerceAtMost(3f) / proj.f * 1.7f
+                                val yaw = (c.yaw - delta.x * 0.0042f).coerceIn(-MAX_YAW, MAX_YAW)
+                                cam = clampCam(Cam(c.x + step * kotlin.math.sin(c.yaw), c.d - step * kotlin.math.cos(c.yaw), yaw))
                                 ch.consume()
                             }
                         }
@@ -394,12 +415,23 @@ fun RoomScreen(
                             val v = vt.calculateVelocity()
                             val c = cam ?: c0
                             val proj = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c)
-                            val k = c.d / proj.f
-                            val vx = -v.x * k
-                            val vd = -v.y * k * 1.7f
+                            val vStep = -v.y * c.d.coerceAtMost(3f) / proj.f * 1.7f
+                            val vYaw = -v.x * 0.0042f
                             camJob = scope.launch {
-                                launch { androidx.compose.animation.core.animateDecay(c.x, vx, androidx.compose.animation.core.FloatExponentialDecaySpec(2.2f)) { value, _ -> cam = clampCam(Cam(value, cam?.d ?: c.d)) } }
-                                launch { androidx.compose.animation.core.animateDecay(c.d, vd, androidx.compose.animation.core.FloatExponentialDecaySpec(2.2f)) { value, _ -> cam = clampCam(Cam(cam?.x ?: c.x, value)) } }
+                                launch {
+                                    var last = 0f
+                                    androidx.compose.animation.core.animateDecay(0f, vStep * 0.6f, androidx.compose.animation.core.FloatExponentialDecaySpec(4f)) { value, _ ->
+                                        val dv = value - last; last = value
+                                        val cc = cam ?: c
+                                        cam = clampCam(Cam(cc.x + dv * kotlin.math.sin(cc.yaw), cc.d - dv * kotlin.math.cos(cc.yaw), cc.yaw))
+                                    }
+                                }
+                                launch {
+                                    androidx.compose.animation.core.animateDecay(c.yaw, vYaw, androidx.compose.animation.core.FloatExponentialDecaySpec(3f)) { value, _ ->
+                                        val cc = cam ?: c
+                                        cam = cc.copy(yaw = value.coerceIn(-MAX_YAW, MAX_YAW))
+                                    }
+                                }
                             }
                             return@awaitEachGesture
                         }
@@ -444,13 +476,14 @@ fun RoomScreen(
                 covers = covers,
                 selectedKey = if (editMode) selectedKey else null,
                 effects = effects,
+                extra = if (isHall) { proj -> drawHallFixtures(proj, allRooms, appSettings, r) } else null,
             )
         }
         // Hinweis
         AnimatedVisibility(showHint && !editMode, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
             Surface(shape = RoundedCornerShape(20.dp), color = Color.Black.copy(alpha = 0.55f)) {
                 Text(
-                    "Wische hoch/runter, um durchs Zimmer zu gehen,\nseitwärts, um dich umzusehen.\nTippe ein Regal an, um die Bücher anzusehen.",
+                    "Wische hoch/runter, um zu gehen,\nnach links/rechts, um dich umzudrehen.\nTippe ein Regal an, um die Bücher anzusehen.",
                     style = TextStyle(fontFamily = Fonts.Lora, fontSize = 14.sp, color = Color(0xFFF6E7C4), textAlign = TextAlign.Center),
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                 )
@@ -505,7 +538,7 @@ fun RoomScreen(
                 IconButton(onClick = { soundOn = !soundOn }, colors = iconColors) { Icon(if (soundOn) Icons.Outlined.VolumeUp else Icons.Outlined.VolumeOff, "Raumklang") }
                 IconButton(onClick = { editMode = true }, colors = iconColors) { Icon(Icons.Outlined.Brush, "Einrichten") }
             } else {
-                TextButton(onClick = onEditRoom) { Text("Raum & Wände", color = Color(0xFFF6E7C4)) }
+                TextButton(onClick = if (isHall) onHallStyle else onEditRoom) { Text(if (isHall) "Flurform & Wände" else "Raum & Wände", color = Color(0xFFF6E7C4)) }
             }
         }
 

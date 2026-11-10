@@ -90,6 +90,13 @@ import com.lesehaus.app.ui.book.BookOpeningOverlay
 import com.lesehaus.app.ui.book.OpeningBook
 import com.lesehaus.app.ui.reader.effectiveTheme
 import com.lesehaus.app.ui.room.RoomScene
+import com.lesehaus.app.ui.room.BookcaseData
+import com.lesehaus.app.ui.room.sortBooks
+import com.lesehaus.app.ui.shelf.BookArrangement
+import com.lesehaus.app.ui.shelf.arrangeBooks
+import com.lesehaus.app.data.ShelfSort
+import com.lesehaus.app.data.enumOr
+import androidx.compose.material.icons.outlined.Brush
 import com.lesehaus.app.ui.theme.Fonts
 import com.lesehaus.app.ui.theme.QuoteStyle
 import kotlinx.coroutines.flow.combine
@@ -138,6 +145,13 @@ fun HomeScreen(
     var detail by remember { mutableStateOf<Book?>(null) }
 
     var nearest by remember { mutableStateOf<ReadingRoom?>(null) }
+    // Der Flur ist ein eigener, einrichtbarer Raum
+    val hall by app.db.rooms().observeHall().collectAsState(initial = null)
+    androidx.compose.runtime.LaunchedEffect(Unit) { app.ensureHall() }
+    val hallId = hall?.id ?: -1L
+    val hallItems = remember(itemsByRoom, hallId) { itemsByRoom[hallId].orEmpty() }
+    val hallCases = rememberRoomBookcases(hallId)
+    val hallPhotos = com.lesehaus.app.ui.room.rememberImages(hallItems.mapNotNull { it.imagePath }, 600)
     Box(Modifier.fillMaxSize()) {
         Scaffold(bottomBar = bottomBar) { pad ->
             Box(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()).background(Color(0xFF120C09))) {
@@ -150,6 +164,20 @@ fun HomeScreen(
                     onEnter = { onOpenRoom(it.id) },
                     onEdit = { onEditRoom(it.id) },
                     onAddRoom = { addRoom = true },
+                    hall = hall,
+                    hallItems = hallItems,
+                    hallCases = hallCases,
+                    images = hallPhotos,
+                    onHallObject = { e ->
+                        val item = e.item
+                        val type = e.type
+                        when {
+                            e.case != null -> if (hallId > 0) onOpenRoom(hallId)
+                            item != null && ((type?.light ?: 0f) > 0f || type == com.lesehaus.app.ui.room.ItemType.STRING_LIGHTS) ->
+                                scope.launch { app.db.rooms().updateItem(item.copy(label = if (item.label == "off") null else "off")) }
+                            else -> Unit
+                        }
+                    },
                 )
                 // Titel
                 Box(
@@ -159,7 +187,7 @@ fun HomeScreen(
                         .windowInsetsPadding(WindowInsets.statusBars)
                         .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 24.dp)
                 ) {
-                    Column(Modifier.padding(end = 96.dp)) {
+                    Column(Modifier.padding(end = 140.dp)) {
                         Text(
                             "Benny's Library",
                             style = TextStyle(fontFamily = Fonts.Playfair, fontStyle = FontStyle.Italic, fontWeight = FontWeight.SemiBold, fontSize = 30.sp, color = Color(0xFFF6E7C4), shadow = Shadow(Color.Black, blurRadius = 10f)),
@@ -173,6 +201,7 @@ fun HomeScreen(
                     }
                     Row(Modifier.align(Alignment.TopEnd)) {
                         val ic = androidx.compose.material3.IconButtonDefaults.iconButtonColors(contentColor = Color(0xFFF6E7C4))
+                        IconButton(onClick = { if (hallId > 0) onOpenRoom(hallId) }, colors = ic) { Icon(Icons.Outlined.Brush, "Flur einrichten") }
                         IconButton(onClick = onLibrary, colors = ic) { Icon(Icons.AutoMirrored.Outlined.LibraryBooks, "Alle Bücher") }
                         IconButton(onClick = onSettings, colors = ic) { Icon(Icons.Outlined.Settings, "Einstellungen") }
                     }
@@ -191,7 +220,7 @@ fun HomeScreen(
                         )
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text("Wische hoch, um den Flur entlangzugehen · Tür antippen zum Eintreten", style = TextStyle(fontFamily = Fonts.Nunito, fontSize = 11.sp, color = Color(0xFFE8D6B4).copy(alpha = 0.8f), shadow = Shadow(Color.Black, blurRadius = 6f)))
+                    Text("Hoch/runter wischen: gehen · seitlich: umdrehen · Tür antippen", style = TextStyle(fontFamily = Fonts.Nunito, fontSize = 11.sp, color = Color(0xFFE8D6B4).copy(alpha = 0.8f), shadow = Shadow(Color.Black, blurRadius = 6f)))
                     Spacer(Modifier.height(8.dp))
                     recent.firstOrNull()?.let { b ->
                         var bounds by remember { mutableStateOf(Rect.Zero) }
@@ -461,4 +490,23 @@ fun LibraryScreen(onBack: () -> Unit, onOpenBook: (Book) -> Unit) {
         }
     }
     detail?.let { b -> BookDetailSheet(b.id, onDismiss = { detail = null }, onRead = { detail = null; onOpenBook(it) }) }
+}
+
+/** Regale eines Raums mit ihren Büchern (für den Flur). */
+@Composable
+fun rememberRoomBookcases(roomId: Long): List<BookcaseData> {
+    val app = LocalContext.current.app
+    val shelves by remember(roomId) { app.db.shelves().observeShelves(roomId) }.collectAsState(initial = emptyList())
+    val byShelf by remember(roomId) {
+        app.db.books().observeBooksOfRoom(roomId).combine(app.db.books().observeLinksOfRoom(roomId)) { books, links ->
+            val byId = books.associateBy { it.id }
+            links.groupBy { it.shelfId }.mapValues { (_, l) -> l.mapNotNull { byId[it.bookId] }.distinctBy { it.id } }
+        }
+    }.collectAsState(initial = emptyMap())
+    return remember(shelves, byShelf) {
+        shelves.map { s ->
+            val books = sortBooks(byShelf[s.id].orEmpty(), enumOr(s.sortOrder, ShelfSort.TITLE))
+            BookcaseData(s, arrangeBooks(books, enumOr(s.arrangement, BookArrangement.ALPHA), s.decor, s.id))
+        }
+    }
 }

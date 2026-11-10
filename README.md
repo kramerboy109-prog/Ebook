@@ -8,12 +8,18 @@ die Bibliothek … In jedem Zimmer stehen echte Bücherregale mit deinen Bücher
 |---|---|---|---|
 | ![](docs/screenshots/02_home.png) | ![](docs/screenshots/03_room.png) | ![](docs/screenshots/04c_room_walk.png) | ![](docs/screenshots/04_bookcase_closeup.png) |
 
+| Zur Tür drehen | Flur mit Treppe | Flurende: Kamin | Flur einrichten |
+|---|---|---|---|
+| ![](docs/screenshots/33_hall_turned.png) | ![](docs/screenshots/32_hall_left_stairs.png) | ![](docs/screenshots/35_hall_end_fireplace.png) | ![](docs/screenshots/36_hall_editor.png) |
+
 | Einrichten | Lesen | Kaminlicht-Modus | Vorlesestimme |
 |---|---|---|---|
 | ![](docs/screenshots/04d_room_catalog.png) | ![](docs/screenshots/07_reader.png) | ![](docs/screenshots/10_reader_cozy.png) | ![](docs/screenshots/09b_voice_sheet.png) |
 
 ## Flur & Zimmer
-- **Begehbarer Flur in Perspektive**: Türen links und rechts, Kassettendecke, Pendelleuchten, Läufer, Bilder, Fenster am Ende des Gangs. Wischen = den Gang entlanggehen; Antippen = vor die Tür treten, die Tür schwingt auf, man geht hinein. 6 Türstile, Türfarbe, Namensschilder, Licht unter der Tür, Tag-/Nachtstimmung. Flur-Tapete, Boden, Decke und Läufer sind einstellbar.
+- **Begehbarer Flur in Perspektive**: Türen links und rechts, Kassettendecke, Pendelleuchten, Läufer, Bilder. Hoch/runter wischen = den Gang entlanggehen (die Blickrichtung bleibt), seitlich wischen = sich zu einer Tür umdrehen; Antippen = zur Tür drehen, die Tür schwingt auf, man geht hinein.
+- **Flurform anpassbar**: Breite, Türabstand, Türen beidseitig oder nur auf einer Seite (gegenüber dann hohe Fenster), Flurende mit Fenster, Kamin, Standuhr, Spiegel & Konsole, Treppe nach oben oder Torbogen – mit Live-Vorschau in den Einstellungen.
+- **Flur einrichten** (Pinsel auf der Startseite): Möbel, Bilder, Pflanzen, Lampen, Haustiere und sogar Bücherregale in den Gang stellen. 6 Türstile, Türfarbe, Namensschilder, Licht unter der Tür, Tag-/Nachtstimmung. Flur-Tapete, Boden, Decke und Läufer sind einstellbar.
 - **Räumliche Zimmer (2,5D)**: echte Fluchtpunkt-Perspektive mit Rückwand, Seitenwänden, Decke und Boden. Wischen hoch/runter = vor und zurück gehen, seitwärts = zur Seite treten (mit Schwung). Raumbreite und -tiefe, Decke (glatt, Holzbalken, Kassetten), Holzvertäfelung und Bodenfarbe sind wählbar.
 - Möbel, Bilder und Regale können an die **linke, rechte oder hintere Wand** oder **frei in den Raum** gestellt werden, inklusive Höhe (z. B. Tasse auf dem Tisch).
 - **Einrichtungsmodus**: alles frei verschieben, mit zwei Fingern skalieren, spiegeln, nach vorn/hinten, umfärben, Varianten wählen, löschen – und aus einem Katalog mit über 30 Dingen hinzufügen: Kamin, Klavier, Sofa, Ohrensessel, Bett, Schreibtisch, Standuhr, Plattenspieler, Bibliotheksleiter, Teleskop, Globus, Stehlampe, Kronleuchter, Wandleuchte, Kerzen, Lichterkette, Fenster (auch Rundbogen), Gemälde, **eigene Fotos im Rahmen**, Spiegel, Wanduhr, Pflanzen, Hängepflanze, Blumen, Teppiche, Katze, Hund …

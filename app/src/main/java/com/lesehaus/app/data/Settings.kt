@@ -103,6 +103,11 @@ data class AppSettings(
     val hallRunner: Int = 0xFF7B2D3B.toInt(),
     val hallWainscot: Boolean = true,
     val hallCeiling: String = "COFFERED",
+    /** Flurform: Breite, Türabstand, Türseiten (BOTH/LEFT/RIGHT), Abschluss des Gangs. */
+    val hallWidth: Float = 1.45f,
+    val hallSpacing: Float = 1.25f,
+    val hallSides: String = "BOTH",
+    val hallEnd: String = "WINDOW",
 )
 
 class SettingsStore(context: Context) {
@@ -251,6 +256,10 @@ class SettingsStore(context: Context) {
                 hallRunner = getInt("a_hallrunner", d.hallRunner),
                 hallWainscot = getBoolean("a_hallwainscot", d.hallWainscot),
                 hallCeiling = getString("a_hallceiling", d.hallCeiling) ?: d.hallCeiling,
+                hallWidth = getFloat("a_hallwidth", d.hallWidth),
+                hallSpacing = getFloat("a_hallspacing", d.hallSpacing),
+                hallSides = getString("a_hallsides", d.hallSides) ?: d.hallSides,
+                hallEnd = getString("a_hallend", d.hallEnd) ?: d.hallEnd,
             )
         }
     }
@@ -275,6 +284,10 @@ class SettingsStore(context: Context) {
             .putInt("a_hallrunner", s.hallRunner)
             .putBoolean("a_hallwainscot", s.hallWainscot)
             .putString("a_hallceiling", s.hallCeiling)
+            .putFloat("a_hallwidth", s.hallWidth)
+            .putFloat("a_hallspacing", s.hallSpacing)
+            .putString("a_hallsides", s.hallSides)
+            .putString("a_hallend", s.hallEnd)
             .apply()
     }
 }
