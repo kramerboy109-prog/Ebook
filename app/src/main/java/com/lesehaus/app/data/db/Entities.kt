@@ -32,6 +32,14 @@ data class ReadingRoom(
     @ColumnInfo(defaultValue = "1.5") val roomWidth: Float = 1.5f,
     /** true, sobald die frei platzierbare Einrichtung angelegt wurde. */
     @ColumnInfo(defaultValue = "0") val decorated: Boolean = false,
+    /** Tiefe des Zimmers (in Wandhöhen) für die räumliche Ansicht. */
+    @ColumnInfo(defaultValue = "2.2") val roomDepth: Float = 2.2f,
+    /** Deckengestaltung: PLAIN, BEAMS, COFFERED. */
+    @ColumnInfo(defaultValue = "PLAIN") val ceiling: String = "PLAIN",
+    /** Holzvertäfelung im unteren Wandbereich. */
+    @ColumnInfo(defaultValue = "0") val wainscot: Boolean = false,
+    /** Bodentönung (0 = Standard). */
+    @ColumnInfo(defaultValue = "0") val floorTint: Int = 0,
 ) {
     val furnitureList: List<String> get() = furniture.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 }
@@ -71,6 +79,8 @@ data class Shelf(
     @ColumnInfo(defaultValue = "1.0") val scale: Float = 1f,
     /** Dekoration in den Fächern (Pflanzen, Kerzen, Figuren). */
     @ColumnInfo(defaultValue = "1") val decor: Boolean = true,
+    /** Wand im Raum: BACK, LEFT, RIGHT, FLOOR (freistehend); leer = alte Flachansicht-Koordinaten. */
+    @ColumnInfo(defaultValue = "") val wall: String = "",
 ) {
     val folderList: List<String> get() = folders.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
     val fileTypeSet: Set<String> get() = fileTypes.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
@@ -207,4 +217,8 @@ data class RoomItem(
     /** Eigenes Bild (z. B. Foto im Rahmen). */
     val imagePath: String? = null,
     val label: String? = null,
+    /** Wand im Raum: BACK, LEFT, RIGHT, FLOOR, CEILING; leer = alte Flachansicht-Koordinaten. */
+    @ColumnInfo(defaultValue = "") val wall: String = "",
+    /** Höhe über dem Boden für freistehende Dinge (z. B. Tasse auf dem Tisch). */
+    @ColumnInfo(defaultValue = "0") val elev: Float = 0f,
 )

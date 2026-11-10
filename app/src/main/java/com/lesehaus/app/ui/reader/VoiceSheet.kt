@@ -55,6 +55,17 @@ import com.lesehaus.app.data.ReaderSettings
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/** Regieanweisungen für KI-Stimmen. */
+val AiStyles = listOf(
+    "Hörbuch" to com.lesehaus.app.data.DEFAULT_AI_STYLE,
+    "Gemütlich am Kamin" to "Lies vor wie ein Großvater am Kaminfeuer: gemütlich, warm, langsam, mit einem Lächeln in der Stimme.",
+    "Gutenachtgeschichte" to "Lies ganz ruhig, sanft und langsam vor, wie eine Gutenachtgeschichte. Leise, warm, mit langen Pausen.",
+    "Dramatisch" to "Lies wie ein dramatischer Hörspielsprecher: spannend, mit deutlichen Stimmungswechseln, Pausen vor Wendepunkten und lebendigen Figuren.",
+    "Geheimnisvoll" to "Lies geheimnisvoll und gedämpft, fast flüsternd, als würdest du nachts im Kerzenschein ein Geheimnis erzählen.",
+    "Fröhlich" to "Lies fröhlich, leicht und beschwingt, mit einem Lächeln.",
+    "Tief & ruhig" to "Sprich mit tiefer, ruhiger, sonorer Stimme und gemächlichem Tempo.",
+)
+
 private data class VoicePreset(val label: String, val pitch: Float, val rate: Float)
 
 private val Presets = listOf(
@@ -89,11 +100,12 @@ fun VoiceSheet(app: AppContainer, s: ReaderSettings, vm: ReaderViewModel, bookLa
             Text("Vorlesestimme", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                SegmentedButton(selected = s.ttsEngine != "AI", onClick = { upd { it.copy(ttsEngine = "SYSTEM") } }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Gerätestimmen") }
-                SegmentedButton(selected = s.ttsEngine == "AI", onClick = { upd { it.copy(ttsEngine = "AI") } }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("KI-Hörbuchstimme") }
+                listOf("SYSTEM" to "Gerät", "GEMINI" to "KI gratis", "AI" to "OpenAI").forEachIndexed { i, (id, l) ->
+                    SegmentedButton(selected = s.ttsEngine == id, onClick = { upd { it.copy(ttsEngine = id) } }, shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text(l) }
+                }
             }
             Spacer(Modifier.height(10.dp))
-            if (s.ttsEngine != "AI") {
+            if (s.ttsEngine == "SYSTEM") {
                 // ---------- Gerätestimmen ----------
                 SwitchRow("Erzählmodus", "Natürliche Pausen, eigene Stimme für wörtliche Rede, Betonung von Fragen und Ausrufen", s.ttsSmart) { v -> upd { it.copy(ttsSmart = v) } }
                 Text("Klang", style = MaterialTheme.typography.titleSmall)
@@ -140,52 +152,79 @@ fun VoiceSheet(app: AppContainer, s: ReaderSettings, vm: ReaderViewModel, bookLa
                     )
                 }
                 Spacer(Modifier.height(6.dp))
-                Text(
-                    "Tipp: Die natürlichsten Stimmen erhältst du in den Android-Einstellungen unter „Sprachausgabe“ (z. B. Google-Sprachdienste → Stimmdaten installieren, Varianten mit „hoher Qualität“). Online-Stimmen klingen oft noch lebendiger.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Kostenlose, natürliche Offline-Stimmen", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Installiere die kostenlose Open-Source-App „SherpaTTS“ (F-Droid oder Play Store) und wähle darin deutsche Stimmen wie „Thorsten“ (männlich) oder „Eva“/„Kerstin“ (weiblich). Stelle SherpaTTS dann unter Android → Sprachausgabe als bevorzugte Engine ein – die Stimmen erscheinen danach hier in der Liste. Alternativ: Google-Sprachdienste → Stimmdaten in „hoher Qualität“ installieren.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
                 Row {
                     TextButton(onClick = { runCatching { context.startActivity(Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Sprachausgabe öffnen") }
                     TextButton(onClick = { runCatching { context.startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Stimmen installieren") }
                 }
             } else {
-                // ---------- KI-Stimme ----------
+                val gemini = s.ttsEngine == "GEMINI"
                 Text(
-                    "Eine KI-Stimme versteht, was sie vorliest: Sie betont Dialoge passend zu den Figuren, macht natürliche Pausen und klingt wie ein Hörbuchsprecher. Dafür wird der vorgelesene Text an OpenAI gesendet (eigener API-Schlüssel nötig, kostet pro Zeichen ein paar Cent).",
+                    if (gemini) "Google Gemini liest wie ein Hörbuchsprecher: Die Stimme versteht den Text, folgt deinen Regieanweisungen (dramatisch, gemütlich, flüsternd …) und kann Erzähler und Figuren mit zwei Stimmen sprechen. Den Schlüssel gibt es kostenlos und ohne Kreditkarte in Google AI Studio (aistudio.google.com → „Get API key“). Das Gratis-Kontingent pro Tag ist begrenzt – ist es aufgebraucht, liest die Gerätestimme automatisch weiter. Der vorgelesene Text wird dafür an Google gesendet."
+                    else "OpenAI-Stimmen klingen sehr natürlich und folgen deinem Vortragsstil. Dafür ist ein eigener, kostenpflichtiger API-Schlüssel nötig (ein paar Cent pro Kapitel). Der vorgelesene Text wird an OpenAI gesendet.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(8.dp))
-                var key by remember { mutableStateOf(appSettings.aiKey) }
+                if (gemini) TextButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://aistudio.google.com/apikey")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Kostenlosen Schlüssel holen") }
+                Spacer(Modifier.height(4.dp))
+                var key by remember(gemini) { mutableStateOf(if (gemini) appSettings.geminiKey else appSettings.aiKey) }
                 OutlinedTextField(
                     value = key,
-                    onValueChange = { key = it.trim(); app.settings.updateApp { a -> a.copy(aiKey = key) } },
-                    label = { Text("OpenAI-API-Schlüssel") },
-                    placeholder = { Text("sk-…") },
+                    onValueChange = { v -> key = v.trim(); app.settings.updateApp { a -> if (gemini) a.copy(geminiKey = key) else a.copy(aiKey = key) } },
+                    label = { Text(if (gemini) "Gemini-API-Schlüssel" else "OpenAI-API-Schlüssel") },
+                    placeholder = { Text(if (gemini) "AIza…" else "sk-…") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text("Der Schlüssel bleibt nur auf diesem Gerät.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(10.dp))
-                Text("Stimme", style = MaterialTheme.typography.titleSmall)
-                AiVoices.forEach { (id, label) ->
-                    VoiceRow(label = label, detail = null, selected = s.aiVoice == id, onSelect = { upd { it.copy(aiVoice = id) } }, onPreview = {
-                        if (key.isBlank()) android.widget.Toast.makeText(context, "Bitte zuerst einen API-Schlüssel eintragen", android.widget.Toast.LENGTH_SHORT).show()
-                        else vm.tts.previewCloud(key, id, s.aiStyle)
-                    })
+                fun cfg(voice: String) = if (gemini) CloudConfig(CloudProvider.GEMINI, key, voice, s.geminiDialogVoice, s.geminiTwoVoices, s.aiStyle, s.geminiModel)
+                else CloudConfig(CloudProvider.OPENAI, key, voice, voice, false, s.aiStyle, "gpt-4o-mini-tts")
+                fun preview(voice: String) {
+                    if (key.isBlank()) android.widget.Toast.makeText(context, "Bitte zuerst einen API-Schlüssel eintragen", android.widget.Toast.LENGTH_SHORT).show()
+                    else vm.tts.previewCloud(cfg(voice))
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Text("Vortragsstil", style = MaterialTheme.typography.titleSmall)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(
-                        "Hörbuch" to com.lesehaus.app.data.DEFAULT_AI_STYLE,
-                        "Gutenachtgeschichte" to "Lies ganz ruhig, sanft und langsam vor, wie eine Gutenachtgeschichte. Leise, warm, mit langen Pausen.",
-                        "Dramatisch" to "Lies wie ein dramatischer Hörspielsprecher: spannend, mit deutlichen Stimmungswechseln, Figuren mit unterschiedlichen Stimmfarben.",
-                        "Gemütlich am Kamin" to "Lies vor wie ein Großvater am Kaminfeuer: gemütlich, warm, mit einem Lächeln in der Stimme.",
-                    ).forEach { (l, style) -> FilterChip(selected = s.aiStyle == style, onClick = { upd { it.copy(aiStyle = style) } }, label = { Text(l) }) }
+                    AiStyles.forEach { (l, style) -> FilterChip(selected = s.aiStyle == style, onClick = { upd { it.copy(aiStyle = style) } }, label = { Text(l) }) }
                 }
-                OutlinedTextField(value = s.aiStyle, onValueChange = { v -> upd { it.copy(aiStyle = v) } }, label = { Text("Eigene Anweisung an die Stimme") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = s.aiStyle, onValueChange = { v -> upd { it.copy(aiStyle = v) } }, label = { Text("Eigene Regieanweisung") }, minLines = 3, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(10.dp))
+                if (gemini) {
+                    SwitchRow("Zwei Stimmen", "Erzähler und Figuren (wörtliche Rede) werden von verschiedenen Stimmen gesprochen", s.geminiTwoVoices) { v -> upd { it.copy(geminiTwoVoices = v) } }
+                    if (s.geminiTwoVoices) SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        SegmentedButton(selected = tab == 0, onClick = { tab = 0 }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Erzähler") }
+                        SegmentedButton(selected = tab == 1, onClick = { tab = 1 }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Figuren") }
+                    }
+                    var gender by remember { mutableStateOf("ALLE") }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                        listOf("ALLE" to "Alle", "männlich" to "Männlich", "weiblich" to "Weiblich").forEach { (g, l) -> FilterChip(selected = gender == g, onClick = { gender = g }, label = { Text(l) }) }
+                    }
+                    val dialogTab = s.geminiTwoVoices && tab == 1
+                    GeminiVoices.filter { gender == "ALLE" || it.second.endsWith(gender) }.forEach { (id, label) ->
+                        VoiceRow(
+                            label = label, detail = null,
+                            selected = if (dialogTab) s.geminiDialogVoice == id else s.geminiVoice == id,
+                            onSelect = { upd { if (dialogTab) it.copy(geminiDialogVoice = id) else it.copy(geminiVoice = id) } },
+                            onPreview = { preview(id) },
+                        )
+                    }
+                    OutlinedTextField(value = s.geminiModel, onValueChange = { v -> upd { it.copy(geminiModel = v.trim()) } }, label = { Text("Modell (fortgeschritten)") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                } else {
+                    Text("Stimme", style = MaterialTheme.typography.titleSmall)
+                    AiVoices.forEach { (id, label) ->
+                        VoiceRow(label = label, detail = null, selected = s.aiVoice == id, onSelect = { upd { it.copy(aiVoice = id) } }, onPreview = { preview(id) })
+                    }
+                }
             }
             Spacer(Modifier.height(30.dp))
         }

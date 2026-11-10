@@ -27,6 +27,8 @@ object Backup {
                     put("id", r.id); put("name", r.name); put("type", r.type); put("wallColor", r.wallColor); put("wallPattern", r.wallPattern)
                     put("floorType", r.floorType); put("windowView", r.windowView); put("weather", r.weather); put("lightLevel", r.lightLevel.toDouble())
                     put("lightWarmth", r.lightWarmth.toDouble()); put("furniture", r.furniture); put("ambientSound", r.ambientSound); put("curtainColor", r.curtainColor); put("sortIndex", r.sortIndex)
+                    put("doorStyle", r.doorStyle); put("doorColor", r.doorColor); put("roomWidth", r.roomWidth.toDouble()); put("roomDepth", r.roomDepth.toDouble())
+                    put("ceiling", r.ceiling); put("wainscot", r.wainscot); put("floorTint", r.floorTint); put("decorated", r.decorated)
                 })
             }
         })
@@ -35,7 +37,18 @@ object Backup {
                 put(JSONObject().apply {
                     put("roomId", s.roomId); put("name", s.name); put("wood", s.wood); put("folders", s.folders); put("recursive", s.recursive)
                     put("fileTypes", s.fileTypes); put("displayMode", s.displayMode); put("sortOrder", s.sortOrder); put("sortIndex", s.sortIndex)
+                    put("style", s.style); put("arrangement", s.arrangement); put("posX", s.posX.toDouble()); put("posY", s.posY.toDouble()); put("scale", s.scale.toDouble()); put("decor", s.decor); put("wall", s.wall)
                 })
+            }
+        })
+        root.put("roomItems", JSONArray().apply {
+            db.rooms().rooms().forEach { r ->
+                db.rooms().items(r.id).forEach { i ->
+                    put(JSONObject().apply {
+                        put("roomId", i.roomId); put("type", i.type); put("x", i.x.toDouble()); put("y", i.y.toDouble()); put("scale", i.scale.toDouble()); put("flip", i.flip)
+                        put("z", i.z); put("color", i.color); put("variant", i.variant); put("imagePath", i.imagePath ?: JSONObject.NULL); put("label", i.label ?: JSONObject.NULL); put("wall", i.wall); put("elev", i.elev.toDouble())
+                    })
+                }
             }
         })
         root.put("books", JSONArray().apply {
@@ -80,6 +93,9 @@ object Backup {
                         floorType = o.getString("floorType"), windowView = o.getString("windowView"), weather = o.getString("weather"),
                         lightLevel = o.getDouble("lightLevel").toFloat(), lightWarmth = o.getDouble("lightWarmth").toFloat(), furniture = o.getString("furniture"),
                         ambientSound = o.getString("ambientSound"), curtainColor = o.getInt("curtainColor"), sortIndex = o.optInt("sortIndex"),
+                        doorStyle = o.optString("doorStyle", "PANEL"), doorColor = o.optInt("doorColor"), roomWidth = o.optDouble("roomWidth", 1.5).toFloat(),
+                        roomDepth = o.optDouble("roomDepth", 2.2).toFloat(), ceiling = o.optString("ceiling", "PLAIN"), wainscot = o.optBoolean("wainscot"),
+                        floorTint = o.optInt("floorTint"), decorated = o.optBoolean("decorated"),
                     )
                 )
                 roomMap[o.getLong("id")] = newId
@@ -93,6 +109,22 @@ object Backup {
                     Shelf(
                         roomId = roomId, name = o.getString("name"), wood = o.getString("wood"), folders = o.optString("folders"), recursive = o.optBoolean("recursive", true),
                         fileTypes = o.optString("fileTypes", DefaultFileTypes), displayMode = o.optString("displayMode", "COVERS"), sortOrder = o.optString("sortOrder", "TITLE"), sortIndex = o.optInt("sortIndex"),
+                        style = o.optString("style", "TALL"), arrangement = o.optString("arrangement", "ALPHA"), posX = o.optDouble("posX", -1.0).toFloat(), posY = o.optDouble("posY", 0.0).toFloat(),
+                        scale = o.optDouble("scale", 1.0).toFloat(), decor = o.optBoolean("decor", true), wall = o.optString("wall", ""),
+                    )
+                )
+            }
+        }
+        root.optJSONArray("roomItems")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val roomId = roomMap[o.getLong("roomId")] ?: continue
+                db.rooms().insertItem(
+                    com.lesehaus.app.data.db.RoomItem(
+                        roomId = roomId, type = o.getString("type"), x = o.getDouble("x").toFloat(), y = o.getDouble("y").toFloat(), scale = o.optDouble("scale", 1.0).toFloat(),
+                        flip = o.optBoolean("flip"), z = o.optInt("z"), color = o.optInt("color"), variant = o.optInt("variant"),
+                        imagePath = if (o.isNull("imagePath")) null else o.optString("imagePath"), label = if (o.isNull("label")) null else o.optString("label"),
+                        wall = o.optString("wall", ""), elev = o.optDouble("elev", 0.0).toFloat(),
                     )
                 )
             }

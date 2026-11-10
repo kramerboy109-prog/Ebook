@@ -127,6 +127,12 @@ class TtsController(context: Context) {
             if (_sleepAt.value in 1 until System.currentTimeMillis()) { stop(); _sleepAt.value = 0L } else onChapterDone?.invoke(ch)
         }
         cloud.onError = { msg -> _error.value = msg; _speaking.value = false }
+        cloud.onQuota = { ch, pos ->
+            // Kontingent erschöpft: nahtlos mit der Gerätestimme weiterlesen
+            _error.value = "Das kostenlose KI-Kontingent für heute ist aufgebraucht – ich lese mit der Gerätestimme weiter."
+            val st = lastSettings
+            if (st != null) speakSystem(ch, lastText, pos, lastParagraphs, st)
+        }
     }
 
     private var language: Locale = Locale.getDefault()
@@ -181,21 +187,35 @@ class TtsController(context: Context) {
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview")
     }
 
-    fun previewCloud(apiKey: String, voice: String, style: String) {
+    fun previewCloud(cfg: CloudConfig) {
         stop()
-        cloud.preview(apiKey, voice, style)
+        cloud.preview(cfg)
     }
 
     /** Liest ein Kapitel ab [from] vor – je nach Einstellung mit Gerätestimme oder KI-Stimme. */
-    fun speak(chapter: Int, text: String, from: Int, paragraphs: List<NarrationParagraph>, s: ReaderSettings, apiKey: String) {
-        if (s.ttsEngine == "AI" && apiKey.isNotBlank()) {
+    private var lastSettings: ReaderSettings? = null
+    private var lastParagraphs: List<NarrationParagraph> = emptyList()
+    private var lastText: String = ""
+
+    fun speak(chapter: Int, text: String, from: Int, paragraphs: List<NarrationParagraph>, s: ReaderSettings, keys: AiKeys) {
+        lastSettings = s; lastParagraphs = paragraphs; lastText = text
+        val cfg = when {
+            s.ttsEngine == "GEMINI" && keys.gemini.isNotBlank() -> CloudConfig(CloudProvider.GEMINI, keys.gemini, s.geminiVoice, s.geminiDialogVoice, s.geminiTwoVoices, s.aiStyle, s.geminiModel)
+            s.ttsEngine == "AI" && keys.openAi.isNotBlank() -> CloudConfig(CloudProvider.OPENAI, keys.openAi, s.aiVoice, s.aiVoice, false, s.aiStyle, "gpt-4o-mini-tts")
+            else -> null
+        }
+        if (cfg != null) {
             tts.stop()
-            _engineLabel.value = "KI-Stimme"
+            _engineLabel.value = if (cfg.provider == CloudProvider.GEMINI) "KI-Stimme (Gemini)" else "KI-Stimme (OpenAI)"
             _speaking.value = true
-            cloud.speak(chapter, text, from, paragraphs, apiKey, s.aiVoice, s.aiStyle)
+            cloud.speak(chapter, text, from, paragraphs, cfg)
             return
         }
-        if (!ready) { pending = { speak(chapter, text, from, paragraphs, s, apiKey) }; return }
+        speakSystem(chapter, text, from, paragraphs, s)
+    }
+
+    private fun speakSystem(chapter: Int, text: String, from: Int, paragraphs: List<NarrationParagraph>, s: ReaderSettings) {
+        if (!ready) { pending = { speakSystem(chapter, text, from, paragraphs, s) }; return }
         cloud.stop()
         _engineLabel.value = "Gerätestimme"
         tts.stop()
@@ -264,14 +284,31 @@ class TtsController(context: Context) {
     }
 }
 
+data class AiKeys(val openAi: String, val gemini: String)
+
+enum class CloudProvider { OPENAI, GEMINI }
+
+data class CloudConfig(
+    val provider: CloudProvider,
+    val key: String,
+    val voice: String,
+    val dialogVoice: String,
+    val twoVoices: Boolean,
+    val style: String,
+    val model: String,
+)
+
+class QuotaException : Exception("Kontingent aufgebraucht")
+
 /**
- * KI-Stimme über die OpenAI-Sprach-API (gpt-4o-mini-tts): versteht den Text und betont ihn
- * wie ein Hörbuchsprecher. Liest absatzweise, lädt die nächsten Absätze im Voraus.
+ * KI-Stimmen: Google Gemini (kostenloses Kontingent, versteht Regieanweisungen, zwei Stimmen
+ * für Erzähler und Figuren) oder OpenAI. Liest absatzweise und lädt im Voraus.
  */
 class CloudNarrator(private val context: Context) {
     var onRange: ((SpokenRange) -> Unit)? = null
     var onChapterDone: ((Int) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onQuota: ((Int, Int) -> Unit)? = null
 
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
     private var job: kotlinx.coroutines.Job? = null
@@ -279,7 +316,7 @@ class CloudNarrator(private val context: Context) {
 
     private data class Chunk(val start: Int, val end: Int, val text: String)
 
-    private fun chunks(text: String, from: Int, paragraphs: List<NarrationParagraph>): List<Chunk> {
+    private fun chunks(text: String, from: Int, paragraphs: List<NarrationParagraph>, maxLen: Int): List<Chunk> {
         val out = ArrayList<Chunk>()
         var curStart = -1
         var curEnd = -1
@@ -288,50 +325,99 @@ class CloudNarrator(private val context: Context) {
             val s = maxOf(p.start, from)
             val t = text.substring(s, p.end).replace('\u200B', ' ').replace('\uFFFC', ' ').trim()
             if (t.isEmpty()) continue
-            if (sb.isNotEmpty() && sb.length + t.length > 900) {
+            if (sb.isNotEmpty() && sb.length + t.length > maxLen) {
                 out += Chunk(curStart, curEnd, sb.toString()); sb.setLength(0); curStart = -1
             }
             if (curStart < 0) curStart = s
             if (sb.isNotEmpty()) sb.append("\n\n")
             sb.append(t)
             curEnd = p.end
-            // sehr lange Absätze an Satzgrenzen teilen (API-Grenze ~4000 Zeichen)
             if (sb.length > 3500) { out += Chunk(curStart, curEnd, sb.toString().take(3900)); sb.setLength(0); curStart = -1 }
         }
         if (sb.isNotEmpty()) out += Chunk(curStart, curEnd, sb.toString())
         return out
     }
 
-    private fun request(apiKey: String, voice: String, style: String, input: String): java.io.File {
-        val url = java.net.URL("https://api.openai.com/v1/audio/speech")
-        val conn = url.openConnection() as java.net.HttpURLConnection
+    /** Wandelt Text in ein „Drehbuch“ für zwei Stimmen (Erzähler/Figur). */
+    private fun script(text: String): String {
+        val sb = StringBuilder()
+        text.split("\n\n").forEach { para ->
+            val segs = DialogSplitter.split(para, 0, para.length, BooleanArray(1), CharArray(1))
+            segs.forEach { seg ->
+                val t = para.substring(seg.start, seg.end).trim().trim('»', '«', '„', '“', '”', '"').trim()
+                if (t.isNotEmpty()) sb.append(if (seg.dialog) "Figur: " else "Erzähler: ").append(t).append('\n')
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun post(url: String, headers: Map<String, String>, body: String): ByteArray {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 15000
-            conn.readTimeout = 60000
+            conn.readTimeout = 120000
             conn.doOutput = true
-            conn.setRequestProperty("Authorization", "Bearer $apiKey")
+            headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
             conn.setRequestProperty("Content-Type", "application/json")
-            val body = org.json.JSONObject()
-                .put("model", "gpt-4o-mini-tts")
-                .put("voice", voice)
-                .put("input", input)
-                .put("instructions", style)
-                .put("response_format", "mp3")
-            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            conn.outputStream.use { it.write(body.toByteArray()) }
             val code = conn.responseCode
+            if (code == 429) throw QuotaException()
             if (code !in 200..299) {
                 val err = conn.errorStream?.use { String(it.readBytes()) } ?: ""
                 val msg = runCatching { org.json.JSONObject(err).getJSONObject("error").getString("message") }.getOrNull()
-                throw IllegalStateException(if (code == 401) "API-Schlüssel ungültig" else "KI-Stimme nicht erreichbar ($code${msg?.let { ": $it" } ?: ""})")
+                throw IllegalStateException(if (code == 401 || code == 403) "API-Schlüssel ungültig oder nicht freigeschaltet" else "KI-Stimme nicht erreichbar ($code${msg?.let { ": " + it.take(160) } ?: ""})")
             }
-            val dir = java.io.File(context.cacheDir, "narration").apply { mkdirs() }
-            val f = java.io.File(dir, "n_${System.nanoTime()}.mp3")
-            conn.inputStream.use { i -> f.outputStream().use { i.copyTo(it) } }
-            return f
+            return conn.inputStream.use { it.readBytes() }
         } finally {
             conn.disconnect()
         }
+    }
+
+    private fun request(cfg: CloudConfig, input: String): java.io.File {
+        val dir = java.io.File(context.cacheDir, "narration").apply { mkdirs() }
+        return when (cfg.provider) {
+            CloudProvider.OPENAI -> {
+                val body = org.json.JSONObject()
+                    .put("model", "gpt-4o-mini-tts").put("voice", cfg.voice).put("input", input)
+                    .put("instructions", cfg.style).put("response_format", "mp3")
+                val bytes = post("https://api.openai.com/v1/audio/speech", mapOf("Authorization" to "Bearer ${cfg.key}"), body.toString())
+                java.io.File(dir, "n_${System.nanoTime()}.mp3").apply { writeBytes(bytes) }
+            }
+            CloudProvider.GEMINI -> {
+                val two = cfg.twoVoices && input.any { it in "»«„“\"" }
+                val prompt = if (two) {
+                    "${cfg.style}\nLies das folgende Hörbuch-Drehbuch auf Deutsch vor. Der Erzähler erzählt, die Figur spricht die wörtliche Rede – passe ihre Stimmung dem Inhalt an. Lies die Sprechernamen nicht mit.\n\n" + script(input)
+                } else "${cfg.style}\nLies den folgenden Text auf Deutsch vor:\n\n$input"
+                fun voice(name: String) = org.json.JSONObject().put("prebuiltVoiceConfig", org.json.JSONObject().put("voiceName", name))
+                val speech = if (two) org.json.JSONObject().put(
+                    "multiSpeakerVoiceConfig", org.json.JSONObject().put(
+                        "speakerVoiceConfigs", org.json.JSONArray()
+                            .put(org.json.JSONObject().put("speaker", "Erzähler").put("voiceConfig", voice(cfg.voice)))
+                            .put(org.json.JSONObject().put("speaker", "Figur").put("voiceConfig", voice(cfg.dialogVoice)))
+                    )
+                ) else org.json.JSONObject().put("voiceConfig", voice(cfg.voice))
+                val body = org.json.JSONObject()
+                    .put("contents", org.json.JSONArray().put(org.json.JSONObject().put("parts", org.json.JSONArray().put(org.json.JSONObject().put("text", prompt)))))
+                    .put("generationConfig", org.json.JSONObject().put("responseModalities", org.json.JSONArray().put("AUDIO")).put("speechConfig", speech))
+                val resp = org.json.JSONObject(String(post("https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent", mapOf("x-goog-api-key" to cfg.key), body.toString())))
+                val inline = resp.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getJSONObject("inlineData")
+                val pcm = android.util.Base64.decode(inline.getString("data"), android.util.Base64.DEFAULT)
+                val rate = Regex("rate=(\\d+)").find(inline.optString("mimeType"))?.groupValues?.get(1)?.toIntOrNull() ?: 24000
+                java.io.File(dir, "n_${System.nanoTime()}.wav").apply { writeBytes(wav(pcm, rate)) }
+            }
+        }
+    }
+
+    /** Verpackt 16-Bit-PCM (mono) in eine WAV-Datei. */
+    private fun wav(pcm: ByteArray, rate: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        fun int(v: Int) { out.write(v and 0xFF); out.write((v shr 8) and 0xFF); out.write((v shr 16) and 0xFF); out.write((v shr 24) and 0xFF) }
+        fun short(v: Int) { out.write(v and 0xFF); out.write((v shr 8) and 0xFF) }
+        out.write("RIFF".toByteArray()); int(36 + pcm.size); out.write("WAVE".toByteArray())
+        out.write("fmt ".toByteArray()); int(16); short(1); short(1); int(rate); int(rate * 2); short(2); short(16)
+        out.write("data".toByteArray()); int(pcm.size); out.write(pcm)
+        return out.toByteArray()
     }
 
     private suspend fun play(file: java.io.File) = kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
@@ -349,22 +435,26 @@ class CloudNarrator(private val context: Context) {
         cont.invokeOnCancellation { runCatching { mp.stop(); mp.release() } }
     }
 
-    fun speak(chapter: Int, text: String, from: Int, paragraphs: List<NarrationParagraph>, apiKey: String, voice: String, style: String) {
+    fun speak(chapter: Int, text: String, from: Int, paragraphs: List<NarrationParagraph>, cfg: CloudConfig) {
         stop()
-        val list = chunks(text, from, paragraphs)
+        // Gemini: größere Abschnitte, um das kostenlose Kontingent zu schonen
+        val list = chunks(text, from, paragraphs, if (cfg.provider == CloudProvider.GEMINI) 2400 else 900)
         job = scope.launch {
+            var current = from
             try {
                 val io = kotlinx.coroutines.Dispatchers.IO
-                // bis zu zwei Absätze im Voraus laden
+                val ahead = if (cfg.provider == CloudProvider.GEMINI) 2 else 3
                 val pending = ArrayDeque<kotlinx.coroutines.Deferred<java.io.File>>()
                 var next = 0
-                fun fill() { while (pending.size < 3 && next < list.size) { val c = list[next++]; pending.addLast(async(io) { request(apiKey, voice, style, c.text) }) } }
+                fun fill() { while (pending.size < ahead && next < list.size) { val c = list[next++]; pending.addLast(async(io) { request(cfg, c.text) }) } }
                 fill()
                 var i = 0
                 while (pending.isNotEmpty()) {
+                    val c = list[i]
+                    current = c.start
                     val file = pending.removeFirst().await()
                     fill()
-                    val c = list[i++]
+                    i++
                     onRange?.invoke(SpokenRange(chapter, c.start, c.end))
                     play(file)
                     runCatching { player?.release() }
@@ -372,22 +462,26 @@ class CloudNarrator(private val context: Context) {
                 onChapterDone?.invoke(chapter)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
+            } catch (e: QuotaException) {
+                onQuota?.invoke(chapter, current)
             } catch (e: Exception) {
                 onError?.invoke(e.message ?: "KI-Stimme konnte nicht geladen werden")
             }
         }
     }
 
-    fun preview(apiKey: String, voice: String, style: String) {
+    fun preview(cfg: CloudConfig) {
         stop()
         job = scope.launch {
             try {
                 val f = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    request(apiKey, voice, style, "»Was für ein gemütlicher Abend«, sagte sie leise und zog die Decke enger um sich. Draußen prasselte der Regen gegen das Fenster.")
+                    request(cfg, "»Was für ein gemütlicher Abend«, sagte sie leise und zog die Decke enger um sich. Draußen prasselte der Regen gegen das Fenster.")
                 }
                 play(f)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
+            } catch (e: QuotaException) {
+                onError?.invoke("Kostenloses Kontingent gerade aufgebraucht – bitte später erneut versuchen.")
             } catch (e: Exception) {
                 onError?.invoke(e.message ?: "Hörprobe fehlgeschlagen")
             }
@@ -402,6 +496,30 @@ class CloudNarrator(private val context: Context) {
         player = null
     }
 }
+
+/** Gemini-Stimmen (kostenloses Kontingent) mit Beschreibung. */
+val GeminiVoices = listOf(
+    "Charon" to "Charon – tief, ruhig, männlich",
+    "Algieba" to "Algieba – samtig, männlich",
+    "Rasalgethi" to "Rasalgethi – erzählerisch, männlich",
+    "Orus" to "Orus – fest, männlich",
+    "Iapetus" to "Iapetus – klar, männlich",
+    "Algenib" to "Algenib – rau, männlich",
+    "Enceladus" to "Enceladus – hauchig, männlich",
+    "Puck" to "Puck – fröhlich, männlich",
+    "Fenrir" to "Fenrir – lebhaft, männlich",
+    "Achird" to "Achird – freundlich, männlich",
+    "Kore" to "Kore – klar, fest, weiblich",
+    "Sulafat" to "Sulafat – warm, weiblich",
+    "Achernar" to "Achernar – weich, weiblich",
+    "Despina" to "Despina – sanft, weiblich",
+    "Vindemiatrix" to "Vindemiatrix – sanftmütig, weiblich",
+    "Gacrux" to "Gacrux – reif, erwachsen, weiblich",
+    "Aoede" to "Aoede – luftig, leicht, weiblich",
+    "Leda" to "Leda – jugendlich, weiblich",
+    "Zephyr" to "Zephyr – hell, weiblich",
+    "Callirrhoe" to "Callirrhoe – entspannt, weiblich",
+)
 
 /** Verfügbare KI-Stimmen mit kurzer Beschreibung. */
 val AiVoices = listOf(

@@ -70,6 +70,11 @@ data class ReaderSettings(
     val ttsEngine: String = "SYSTEM",
     val aiVoice: String = "coral",
     val aiStyle: String = DEFAULT_AI_STYLE,
+    /** Gemini (kostenloses Kontingent): Erzähler- und Figurenstimme. */
+    val geminiVoice: String = "Charon",
+    val geminiDialogVoice: String = "Kore",
+    val geminiTwoVoices: Boolean = true,
+    val geminiModel: String = "gemini-2.5-flash-preview-tts",
 ) {
     /** Einstellungen, die das Seitenlayout beeinflussen (für Pagination-Cache). */
     fun layoutKey(): String = listOf(fontKey, fontSize, fontWeight, lineHeight, letterSpacing, paragraphSpacing, indent, marginH, marginV, align, hyphenation, showHeader, showFooter, showImages, pageMode).joinToString("|")
@@ -87,8 +92,17 @@ data class AppSettings(
     val customFonts: List<String> = emptyList(),
     /** API-Schlüssel für die KI-Stimme (bleibt nur auf dem Gerät). */
     val aiKey: String = "",
+    /** Kostenloser Gemini-API-Schlüssel aus Google AI Studio. */
+    val geminiKey: String = "",
     /** Zimmerklang beim Lesen weiterspielen. */
     val roomAmbienceInReader: Boolean = true,
+    /** Gestaltung des Flurs. */
+    val hallWall: Int = 0xFFD9C7A6.toInt(),
+    val hallPattern: String = "STRIPES",
+    val hallFloor: String = "PARQUET",
+    val hallRunner: Int = 0xFF7B2D3B.toInt(),
+    val hallWainscot: Boolean = true,
+    val hallCeiling: String = "COFFERED",
 )
 
 class SettingsStore(context: Context) {
@@ -157,6 +171,10 @@ class SettingsStore(context: Context) {
                 ttsEngine = getString("r_ttsengine", d.ttsEngine) ?: "SYSTEM",
                 aiVoice = getString("r_aivoice", d.aiVoice) ?: d.aiVoice,
                 aiStyle = getString("r_aistyle", d.aiStyle) ?: d.aiStyle,
+                geminiVoice = getString("r_gvoice", d.geminiVoice) ?: d.geminiVoice,
+                geminiDialogVoice = getString("r_gdialog", d.geminiDialogVoice) ?: d.geminiDialogVoice,
+                geminiTwoVoices = getBoolean("r_gtwo", d.geminiTwoVoices),
+                geminiModel = getString("r_gmodel", d.geminiModel) ?: d.geminiModel,
             )
         }
     }
@@ -204,6 +222,10 @@ class SettingsStore(context: Context) {
             .putString("r_ttsengine", s.ttsEngine)
             .putString("r_aivoice", s.aiVoice)
             .putString("r_aistyle", s.aiStyle)
+            .putString("r_gvoice", s.geminiVoice)
+            .putString("r_gdialog", s.geminiDialogVoice)
+            .putBoolean("r_gtwo", s.geminiTwoVoices)
+            .putString("r_gmodel", s.geminiModel)
             .apply()
     }
 
@@ -221,7 +243,14 @@ class SettingsStore(context: Context) {
                 roomSounds = getBoolean("a_roomsounds", d.roomSounds),
                 customFonts = (getString("a_fonts", "") ?: "").split('\n').filter { it.isNotBlank() },
                 aiKey = getString("a_aikey", "") ?: "",
+                geminiKey = getString("a_geminikey", "") ?: "",
                 roomAmbienceInReader = getBoolean("a_roomamb", d.roomAmbienceInReader),
+                hallWall = getInt("a_hallwall", d.hallWall),
+                hallPattern = getString("a_hallpattern", d.hallPattern) ?: d.hallPattern,
+                hallFloor = getString("a_hallfloor", d.hallFloor) ?: d.hallFloor,
+                hallRunner = getInt("a_hallrunner", d.hallRunner),
+                hallWainscot = getBoolean("a_hallwainscot", d.hallWainscot),
+                hallCeiling = getString("a_hallceiling", d.hallCeiling) ?: d.hallCeiling,
             )
         }
     }
@@ -238,7 +267,14 @@ class SettingsStore(context: Context) {
             .putBoolean("a_roomsounds", s.roomSounds)
             .putString("a_fonts", s.customFonts.joinToString("\n"))
             .putString("a_aikey", s.aiKey)
+            .putString("a_geminikey", s.geminiKey)
             .putBoolean("a_roomamb", s.roomAmbienceInReader)
+            .putInt("a_hallwall", s.hallWall)
+            .putString("a_hallpattern", s.hallPattern)
+            .putString("a_hallfloor", s.hallFloor)
+            .putInt("a_hallrunner", s.hallRunner)
+            .putBoolean("a_hallwainscot", s.hallWainscot)
+            .putString("a_hallceiling", s.hallCeiling)
             .apply()
     }
 }

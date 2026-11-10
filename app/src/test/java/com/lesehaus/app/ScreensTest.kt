@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.swipe
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
@@ -160,12 +161,11 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         waitForText("Mein Regal")
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("screens/04b_room_arch_mixed.png")
-        compose.onNodeWithContentDescription("Übersicht").performClick()
-        compose.mainClock.advanceTimeBy(1000)
+        // ein paar Schritte ins Zimmer und nach links gehen
+        compose.onRoot().performTouchInput { swipe(androidx.compose.ui.geometry.Offset(width * 0.5f, height * 0.55f), androidx.compose.ui.geometry.Offset(width * 0.75f, height * 0.8f), 400) }
+        compose.mainClock.advanceTimeBy(1500)
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage("screens/04c_room_overview.png")
-        compose.onNodeWithContentDescription("Hineingehen").performClick()
-        compose.mainClock.advanceTimeBy(800)
+        compose.onRoot().captureRoboImage("screens/04c_room_walk.png")
         compose.onNodeWithContentDescription("Einrichten").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Hinzufügen", useUnmergedTree = true).performClick()

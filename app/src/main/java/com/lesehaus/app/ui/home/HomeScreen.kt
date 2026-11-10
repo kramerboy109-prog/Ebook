@@ -137,108 +137,89 @@ fun HomeScreen(
     var opening by remember { mutableStateOf<OpeningBook?>(null) }
     var detail by remember { mutableStateOf<Book?>(null) }
 
+    var nearest by remember { mutableStateOf<ReadingRoom?>(null) }
     Box(Modifier.fillMaxSize()) {
         Scaffold(bottomBar = bottomBar) { pad ->
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = pad.calculateBottomPadding() + 24.dp)) {
-                item {
-                    // Der Flur mit den Zimmertüren
-                    val list = rooms.orEmpty()
-                    val pager = rememberPagerState { list.size + 1 }
-                    Box(Modifier.fillMaxWidth().height(640.dp)) {
-                        Hallway(
-                            rooms = list,
-                            itemsByRoom = itemsByRoom,
-                            pager = pager,
-                            animate = appSettings.roomAnimations,
-                            modifier = Modifier.fillMaxSize().padding(top = 0.dp),
-                            onEnter = { onOpenRoom(it.id) },
-                            onEdit = { onEditRoom(it.id) },
-                            onAddRoom = { addRoom = true },
+            Box(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding()).background(Color(0xFF120C09))) {
+                Hallway3D(
+                    rooms = rooms.orEmpty(),
+                    settings = appSettings,
+                    animate = appSettings.roomAnimations,
+                    modifier = Modifier.fillMaxSize(),
+                    onNearest = { nearest = it },
+                    onEnter = { onOpenRoom(it.id) },
+                    onEdit = { onEditRoom(it.id) },
+                    onAddRoom = { addRoom = true },
+                )
+                // Titel
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.65f), Color.Transparent)))
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 24.dp)
+                ) {
+                    Column(Modifier.padding(end = 96.dp)) {
+                        Text(
+                            "Benny's Library",
+                            style = TextStyle(fontFamily = Fonts.Playfair, fontStyle = FontStyle.Italic, fontWeight = FontWeight.SemiBold, fontSize = 30.sp, color = Color(0xFFF6E7C4), shadow = Shadow(Color.Black, blurRadius = 10f)),
                         )
-                        // Titel über dem Flur
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
-                                .windowInsetsPadding(WindowInsets.statusBars)
-                                .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 18.dp)
-                        ) {
-                            Column(Modifier.padding(end = 96.dp)) {
-                                Text(
-                                    "Benny's Library",
-                                    style = TextStyle(fontFamily = Fonts.Playfair, fontStyle = FontStyle.Italic, fontWeight = FontWeight.SemiBold, fontSize = 30.sp, color = Color(0xFFF6E7C4), shadow = Shadow(Color.Black, blurRadius = 10f)),
-                                )
-                                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                                val todayMin = (days.firstOrNull { it.day == today }?.total ?: 0L) / 60_000
-                                Text(
-                                    greeting() + " · " + if (todayMin > 0) "heute $todayMin von ${appSettings.dailyGoalMinutes} Min. gelesen" else "Wohin möchtest du heute?",
-                                    style = TextStyle(fontFamily = Fonts.Lora, fontSize = 14.sp, color = Color(0xFFEBD9B4), shadow = Shadow(Color.Black, blurRadius = 6f)),
-                                )
-                            }
-                            Row(Modifier.align(Alignment.TopEnd)) {
-                                val ic = androidx.compose.material3.IconButtonDefaults.iconButtonColors(contentColor = Color(0xFFF6E7C4))
-                                IconButton(onClick = onLibrary, colors = ic) { Icon(Icons.AutoMirrored.Outlined.LibraryBooks, "Alle Bücher") }
-                                IconButton(onClick = onSettings, colors = ic) { Icon(Icons.Outlined.Settings, "Einstellungen") }
-                            }
-                        }
-                        val cur = list.getOrNull(pager.currentPage)
+                        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                        val todayMin = (days.firstOrNull { it.day == today }?.total ?: 0L) / 60_000
+                        Text(
+                            greeting() + " · " + if (todayMin > 0) "heute $todayMin von ${appSettings.dailyGoalMinutes} Min. gelesen" else "Wohin möchtest du heute?",
+                            style = TextStyle(fontFamily = Fonts.Lora, fontSize = 14.sp, color = Color(0xFFEBD9B4), shadow = Shadow(Color.Black, blurRadius = 6f)),
+                        )
+                    }
+                    Row(Modifier.align(Alignment.TopEnd)) {
+                        val ic = androidx.compose.material3.IconButtonDefaults.iconButtonColors(contentColor = Color(0xFFF6E7C4))
+                        IconButton(onClick = onLibrary, colors = ic) { Icon(Icons.AutoMirrored.Outlined.LibraryBooks, "Alle Bücher") }
+                        IconButton(onClick = onSettings, colors = ic) { Icon(Icons.Outlined.Settings, "Einstellungen") }
+                    }
+                }
+                // Unten: Tür vor dir, Weiterlesen, Zitat des Tages
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    val cur = nearest
+                    Surface(shape = RoundedCornerShape(20.dp), color = Color.Black.copy(alpha = 0.55f), onClick = { cur?.let { onOpenRoom(it.id) } ?: run { addRoom = true } }) {
                         Text(
                             if (cur != null) {
                                 val (sh, bk) = stats[cur.id] ?: (0 to 0)
-                                "$sh ${if (sh == 1) "Regal" else "Regale"} · $bk ${if (bk == 1) "Buch" else "Bücher"} · Tür antippen zum Eintreten"
-                            } else "Wische zu den Türen →",
-                            style = TextStyle(fontFamily = Fonts.Nunito, fontSize = 12.sp, color = Color(0xFFF2E3C6), shadow = Shadow(Color.Black, blurRadius = 6f)),
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
+                                "${cur.name} · $sh ${if (sh == 1) "Regal" else "Regale"} · $bk ${if (bk == 1) "Buch" else "Bücher"}  →"
+                            } else "Neues Zimmer einrichten  +",
+                            style = TextStyle(fontFamily = Fonts.Nunito, fontSize = 13.sp, color = Color(0xFFF2E3C6)),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                         )
                     }
-                }
-                if (recent.isNotEmpty()) {
-                    item { SectionTitle("Weiterlesen") }
-                    item {
-                        ContinueCard(recent.first(), onClick = { b, r -> if (appSettings.bookAnimations && r.width > 0) opening = OpeningBook(b, r) else onOpenBook(b) }, onLong = { detail = it })
-                    }
-                    if (recent.size > 1) item {
-                        LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 12.dp)) {
-                            items(recent.drop(1), key = { it.id }) { b ->
-                                var bounds by remember { mutableStateOf(Rect.Zero) }
-                                Column(Modifier.width(78.dp)) {
-                                    BookCover(
-                                        b,
-                                        Modifier
-                                            .width(78.dp)
-                                            .aspectRatio(0.67f)
-                                            .onGloballyPositioned { bounds = it.boundsInRoot() }
-                                            .shadow(6.dp, RoundedCornerShape(topEnd = 3.dp, bottomEnd = 3.dp))
-                                            .clip(RoundedCornerShape(topEnd = 3.dp, bottomEnd = 3.dp))
-                                            .combinedClickable(onClick = { if (appSettings.bookAnimations) opening = OpeningBook(b, bounds) else onOpenBook(b) }, onLongClick = { detail = b }),
-                                        titleSize = 10.dp,
-                                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text("Wische hoch, um den Flur entlangzugehen · Tür antippen zum Eintreten", style = TextStyle(fontFamily = Fonts.Nunito, fontSize = 11.sp, color = Color(0xFFE8D6B4).copy(alpha = 0.8f), shadow = Shadow(Color.Black, blurRadius = 6f)))
+                    Spacer(Modifier.height(8.dp))
+                    recent.firstOrNull()?.let { b ->
+                        var bounds by remember { mutableStateOf(Rect.Zero) }
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f),
+                            shadowElevation = 8.dp,
+                            modifier = Modifier.fillMaxWidth().combinedClickable(
+                                onClick = { if (appSettings.bookAnimations && bounds.width > 0) opening = OpeningBook(b, bounds) else onOpenBook(b) },
+                                onLongClick = { detail = b },
+                            ),
+                        ) {
+                            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                BookCover(b, Modifier.width(44.dp).aspectRatio(0.67f).onGloballyPositioned { bounds = it.boundsInRoot() }.clip(RoundedCornerShape(topEnd = 3.dp, bottomEnd = 3.dp)), titleSize = 7.dp)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("Weiterlesen", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                    Text(b.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Spacer(Modifier.height(4.dp))
-                                    Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-                                        Box(Modifier.fillMaxWidth(b.progress.coerceIn(0f, 1f)).height(3.dp).background(MaterialTheme.colorScheme.primary))
+                                    Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                                        Box(Modifier.fillMaxWidth(b.progress.coerceIn(0f, 1f)).height(4.dp).background(MaterialTheme.colorScheme.primary))
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-                // Lieblingsstelle des Tages
-                if (favorites.isNotEmpty()) {
-                    val dayIndex = (System.currentTimeMillis() / 86_400_000L).toInt()
-                    val fav = favorites[dayIndex % favorites.size]
-                    item { SectionTitle("Lieblingsstelle des Tages") }
-                    item {
-                        Card(
-                            onClick = { onFavorite(fav.id) },
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                            shape = RoundedCornerShape(18.dp),
-                        ) {
-                            Column(Modifier.padding(18.dp)) {
-                                Icon(Icons.Outlined.FormatQuote, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                                Text(fav.text, style = QuoteStyle.copy(color = MaterialTheme.colorScheme.onSurface), maxLines = 7, overflow = TextOverflow.Ellipsis)
-                                Spacer(Modifier.height(8.dp))
-                                Text("— ${listOf(fav.bookAuthor, fav.bookTitle).filter { it.isNotBlank() }.joinToString(", ")}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (favorites.isNotEmpty()) {
+                                    val dayIndex = (System.currentTimeMillis() / 86_400_000L).toInt()
+                                    val fav = favorites[dayIndex % favorites.size]
+                                    IconButton(onClick = { onFavorite(fav.id) }) { Icon(Icons.Outlined.FormatQuote, "Lieblingsstelle des Tages", tint = MaterialTheme.colorScheme.primary) }
+                                }
                             }
                         }
                     }

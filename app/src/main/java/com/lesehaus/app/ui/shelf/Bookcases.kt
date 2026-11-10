@@ -169,7 +169,7 @@ fun capacities(style: BookcaseStyle, r: Rect): List<Float> = compartments(style,
 // ------------------------------------------------------------------------------------------------
 private val titlePaint = Paint().apply { isAntiAlias = true; typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD) }
 
-fun DrawScope.drawBookcase(shelf: Shelf, r: Rect, pieces: List<Piece>, covers: Map<String, ImageBitmap>) {
+fun DrawScope.drawBookcase(shelf: Shelf, r: Rect, pieces: List<Piece>, covers: Map<String, ImageBitmap>, alignRight: Boolean = false) {
     val style = enumOr(shelf.style, BookcaseStyle.TALL)
     val wood = enumOr(shelf.wood, Wood.WALNUT)
     val base = Color(wood.base)
@@ -230,7 +230,7 @@ fun DrawScope.drawBookcase(shelf: Shelf, r: Rect, pieces: List<Piece>, covers: M
         // Schatten des oberen Bretts
         drawRect(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent), c.top, c.top + c.height * 0.2f), c.topLeft, Size(c.width, c.height * 0.2f))
         clipRect(c.left, c.top - c.height, c.right, c.bottom) {
-            drawPieces(filled.getOrNull(i).orEmpty(), c, covers)
+            drawPieces(filled.getOrNull(i).orEmpty(), c, covers, alignRight)
         }
         // Brett unter dem Fach
         drawRect(Brush.verticalGradient(listOf(light, base, dark), c.bottom, c.bottom + boardH), Offset(c.left - (if (style == BookcaseStyle.WALL) c.width * 0.02f else 0f), c.bottom), Size(c.width + (if (style == BookcaseStyle.WALL) c.width * 0.04f else 0f), boardH))
@@ -253,9 +253,9 @@ fun DrawScope.drawBookcase(shelf: Shelf, r: Rect, pieces: List<Piece>, covers: M
     }
 }
 
-private fun DrawScope.drawPieces(pieces: List<Piece>, c: Rect, covers: Map<String, ImageBitmap>) {
+private fun DrawScope.drawPieces(pieces: List<Piece>, c: Rect, covers: Map<String, ImageBitmap>, alignRight: Boolean = false) {
     val u = c.height / 10f
-    var x = c.left + u * 0.3f
+    var x = if (alignRight) c.right - u * 0.3f - pieces.sumOf { it.units.toDouble() }.toFloat() * u else c.left + u * 0.3f
     for (p in pieces) {
         val pw = p.units * u
         when (p) {

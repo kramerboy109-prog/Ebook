@@ -51,7 +51,7 @@ class MigrationAndNarrationTest {
             db.version = 1
         }
         val room = androidx.room.Room.databaseBuilder(ctx, AppDatabase::class.java, name)
-            .addMigrations(com.lesehaus.app.data.db.MIGRATION_1_2)
+            .addMigrations(com.lesehaus.app.data.db.MIGRATION_1_2, com.lesehaus.app.data.db.MIGRATION_2_3)
             .allowMainThreadQueries()
             .build()
         runBlocking {
@@ -63,8 +63,26 @@ class MigrationAndNarrationTest {
             assertEquals("TALL", s.style)
             assertEquals(-1f, s.posX)
             assertTrue(room.rooms().items(r.id).isEmpty())
+            assertEquals(2.2f, r.roomDepth)
+            assertEquals("", s.wall)
         }
         room.close()
+    }
+
+    @Test
+    fun backupRoundTripKeepsDecoration() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<LesehausApp>().container
+        val id = app.createRoom(com.lesehaus.app.data.RoomType.LIBRARY)
+        val itemsBefore = app.db.rooms().items(id).size
+        assertTrue(itemsBefore > 3)
+        val json = com.lesehaus.app.data.Backup.export(app)
+        com.lesehaus.app.data.Backup.import(app, json)
+        val rooms = app.db.rooms().rooms()
+        assertEquals(2, rooms.size)
+        val copy = rooms.first { it.id != id }
+        assertEquals(itemsBefore, app.db.rooms().items(copy.id).size)
+        assertTrue(copy.decorated)
+        assertEquals("LEFT", app.db.shelves().shelves(copy.id).single().wall)
     }
 
     @Test

@@ -292,9 +292,10 @@ private fun DrawScope.drawSelection(sel: RoomTarget, items: List<RoomItem>, case
     listOf(rr.topLeft, rr.topRight, rr.bottomLeft, rr.bottomRight).forEach { drawCircle(Color(0xFFFFE08A), 9f, it) }
 }
 
-/** Vorschau eines Zimmers (Startseite, Dialoge) – nutzt gespeicherte oder Standard-Einrichtung. */
+/** Vorschau eines Zimmers (Flur, Dialoge, Editor) – räumlich, aus der Standardperspektive. */
 @Composable
 fun RoomScene(room: ReadingRoom, modifier: Modifier = Modifier, animate: Boolean = true, items: List<RoomItem>? = null, bookcases: List<BookcaseData> = emptyList()) {
-    val list = items ?: remember(room) { defaultSetup(room, emptyList()).items }
-    RoomCanvas(room, list, bookcases, modifier, animate)
+    val setup = remember(room, items == null) { if (items == null) defaultSetup(room, emptyList()) else null }
+    val r = if (setup != null) room.copy(roomWidth = setup.roomWidth) else room
+    Room3D(r, items ?: setup!!.items, bookcases, cam = { defaultCam(r) }, modifier = modifier, animate = animate)
 }

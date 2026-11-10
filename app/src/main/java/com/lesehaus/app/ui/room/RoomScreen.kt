@@ -201,25 +201,26 @@ fun RoomScreen(
     val readerSettings by app.settings.reader.collectAsState()
 
     var editMode by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf<RoomTarget?>(null) }
+    var selectedKey by remember { mutableStateOf<String?>(null) }
     var dragItem by remember { mutableStateOf<RoomItem?>(null) }
     var dragShelf by remember { mutableStateOf<Shelf?>(null) }
     var closeUp by remember { mutableStateOf<Long?>(null) }
     var opening by remember { mutableStateOf<OpeningBook?>(null) }
     var detail by remember { mutableStateOf<Book?>(null) }
     var catalog by remember { mutableStateOf(false) }
-    var overview by remember { mutableStateOf(false) }
     var soundOn by remember { mutableStateOf(appSettings.roomSounds) }
-    var effects by remember { mutableStateOf(listOf<RoomEffect>()) }
+    var effects by remember { mutableStateOf(listOf<Effect3D>()) }
     var confirmDeleteShelf by remember { mutableStateOf<Shelf?>(null) }
     var pendingPhoto by remember { mutableStateOf<RoomItem?>(null) }
     var showHint by remember { mutableStateOf(true) }
+    var cam by remember { mutableStateOf<Cam?>(null) }
+    var camJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     LaunchedEffect(shelves.map { it.id }) {
         if (appSettings.autoScan) shelves.filter { it.folderList.isNotEmpty() && System.currentTimeMillis() - it.lastScan > 10 * 60_000 }.forEach { app.scanShelf(it) }
         if (shelves.any { it.posX < 0f }) app.ensureDecorated(roomId)
     }
-    LaunchedEffect(Unit) { delay(5000); showHint = false }
+    LaunchedEffect(Unit) { delay(6000); showHint = false }
 
     // Klang: Raumklang + Plattenspieler
     val player = remember { AmbientPlayer() }
@@ -254,8 +255,23 @@ fun RoomScreen(
     }
 
     val r = room ?: return
-    val items = remember(dbItems, dragItem) { dragItem?.let { d -> dbItems.map { if (it.id == d.id) d else it } } ?: dbItems }
-    val shelvesShown = remember(shelves, dragShelf) { dragShelf?.let { d -> shelves.map { if (it.id == d.id) d else it } } ?: shelves }
+    LaunchedEffect(r.id) { if (cam == null) cam = defaultCam(r) }
+    val (xRange, minD, maxD) = camLimits(r)
+    fun clampCam(c: Cam) = Cam(c.x.coerceIn(xRange.start, xRange.endInclusive), c.d.coerceIn(minD, maxD))
+    fun moveCam(to: Cam, ms: Int = 520) {
+        camJob?.cancel()
+        val from = cam ?: defaultCam(r)
+        camJob = scope.launch {
+            androidx.compose.animation.core.animate(0f, 1f, animationSpec = tween(ms, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { v, _ ->
+                cam = clampCam(Cam(from.x + (to.x - from.x) * v, from.d + (to.d - from.d) * v))
+            }
+        }
+    }
+
+    val normItems = remember(dbItems) { normalizeItems(dbItems) }
+    val items = remember(normItems, dragItem) { dragItem?.let { d -> normItems.map { if (it.id == d.id) d else it } } ?: normItems }
+    val normShelves = remember(shelves) { shelves.map { normalizeShelf(it) } }
+    val shelvesShown = remember(normShelves, dragShelf) { dragShelf?.let { d -> normShelves.map { if (it.id == d.id) d else it } } ?: normShelves }
     val sortedBooks = remember(booksByShelf, shelves) { shelves.associate { s -> s.id to sortBooks(booksByShelf[s.id].orEmpty(), enumOr(s.sortOrder, ShelfSort.TITLE)) } }
     val bookcases = remember(shelvesShown, sortedBooks) {
         shelvesShown.map { s -> BookcaseData(s, arrangeBooks(sortedBooks[s.id].orEmpty(), enumOr(s.arrangement, BookArrangement.ALPHA), s.decor, s.id)) }
@@ -265,179 +281,196 @@ fun RoomScreen(
         bookcases.filter { enumOr(it.shelf.arrangement, BookArrangement.ALPHA) == BookArrangement.COVERS }.flatMap { b -> sortedBooks[b.shelf.id].orEmpty().take(60).mapNotNull { it.coverPath } }
     }
     val covers = rememberImages(coverPaths, 260)
+    val scene = remember(r, items, bookcases) { buildScene(r, items, bookcases) }
+
+    /** Wendet neue Weltkoordinaten auf ein Objekt an (als Anteile gespeichert). */
+    fun applyMove(e: SceneEnt, a: Float, b: Float, scaleF: Float = 1f) {
+        val w = r.roomWidth
+        val dp = r.roomDepth
+        val (lenA, isFrac) = when (e.wall) { Wall.BACK, Wall.FLOOR, Wall.CEILING -> w to true; else -> dp to true }
+        val half = e.ww * scaleF / 2f
+        val fa = ((a.coerceIn(half, lenA - half)) / lenA).let { if (isFrac) it else it }
+        val fb = when (e.wall) {
+            Wall.BACK, Wall.LEFT, Wall.RIGHT -> b.coerceIn(0f, (1f - e.wh * scaleF).coerceAtLeast(0f))
+            Wall.FLOOR -> (b / dp).coerceIn(0.02f, 1f)
+            Wall.CEILING -> (b / dp).coerceIn(0.05f, 1f)
+        }
+        e.item?.let { base -> val cur = dragItem ?: base; dragItem = cur.copy(x = fa, y = fb, scale = (cur.scale * scaleF).coerceIn(0.3f, 4f), wall = e.wall.name) }
+        e.case?.let { base -> val cur = dragShelf ?: base.shelf; dragShelf = cur.copy(posX = fa, posY = fb, scale = (cur.scale * scaleF).coerceIn(0.5f, 2.4f), wall = e.wall.name) }
+    }
+
+    val currentScene by rememberUpdatedState(scene)
+    val currentEdit by rememberUpdatedState(editMode)
+    val currentSelected by rememberUpdatedState(selectedKey)
 
     Box(Modifier.fillMaxSize().background(Color(0xFF120C09))) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val density = LocalDensity.current
-            val viewW = with(density) { maxWidth.toPx() }
-            val viewH = with(density) { maxHeight.toPx() }
-            // Bezugshöhe: im Hochformat aus der Breite abgeleitet, damit Möbel nicht riesig wirken
-            val roomH = minOf(viewH, viewW * 1.35f)
-            val roomTop = (viewH - roomH) * 0.55f
-            val roomW = maxOf(r.roomWidth * roomH, viewW)
-            val scroll = rememberScrollState()
-            val fit = viewW / roomW
-            val zoom = remember { Animatable(1f) }
-            LaunchedEffect(overview) {
-                if (overview) { scroll.animateScrollTo(0); zoom.animateTo(fit, tween(500)) } else zoom.animateTo(1f, tween(450))
-            }
-            // Beim ersten Öffnen zum ersten Regal schauen
-            LaunchedEffect(roomW, shelves.firstOrNull()?.posX) {
-                val s = shelves.firstOrNull { it.posX >= 0f } ?: return@LaunchedEffect
-                if (scroll.value == 0) scroll.scrollTo(((s.posX * roomW) - viewW / 2).roundToInt().coerceIn(0, scroll.maxValue))
-            }
-            val currentItems by rememberUpdatedState(items)
-            val currentCases by rememberUpdatedState(bookcases)
-            val currentEdit by rememberUpdatedState(editMode)
-            val currentSelected by rememberUpdatedState(selected)
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .horizontalScroll(scroll, enabled = !overview && dragItem == null && dragShelf == null)
-            ) {
-                Box(
-                    Modifier
-                        .width(with(density) { roomW.toDp() })
-                        .fillMaxHeight()
-                        .graphicsLayer {
-                            scaleX = zoom.value; scaleY = zoom.value
-                            transformOrigin = TransformOrigin(0f, 0f)
-                            translationY = (viewH - viewH * zoom.value) / 2f
-                        }
-                        .pointerInput(roomW, roomH) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                val target = hitTest(down.position - Offset(0f, roomTop), currentItems, currentCases, roomW, roomH, includeDecals = currentEdit)
-                                if (currentEdit && target != null) {
-                                    // Auswählen und verschieben/zoomen
-                                    selected = target
-                                    down.consume()
-                                    var moved = false
-                                    var lastDist = 0f
-                                    while (true) {
-                                        val ev = awaitPointerEvent()
-                                        val pressed = ev.changes.filter { it.pressed }
-                                        if (pressed.isEmpty()) break
-                                        if (pressed.size >= 2) {
-                                            val d = (pressed[0].position - pressed[1].position).getDistance()
-                                            if (lastDist > 0f) {
-                                                val f = d / lastDist
-                                                when (target) {
-                                                    is RoomTarget.Item -> { val base = dragItem ?: target.item; dragItem = base.copy(scale = (base.scale * f).coerceIn(0.3f, 4f)) }
-                                                    is RoomTarget.Case -> { val base = dragShelf ?: target.shelf; dragShelf = base.copy(scale = (base.scale * f).coerceIn(0.5f, 2.2f)) }
-                                                }
-                                            }
-                                            lastDist = d
-                                            moved = true
-                                        } else {
-                                            lastDist = 0f
-                                            val c = pressed[0]
-                                            val delta = c.position - c.previousPosition
-                                            if (delta.getDistance() > 0f) moved = true
-                                            when (target) {
-                                                is RoomTarget.Item -> {
-                                                    val base = dragItem ?: target.item
-                                                    val type = itemTypeOf(base.type)
-                                                    dragItem = base.copy(x = (base.x + delta.x / roomW).coerceIn(0f, 1f), y = clampY(type?.layer, base.y + delta.y / roomH, type?.h ?: 0.1f, base.scale))
-                                                }
-                                                is RoomTarget.Case -> {
-                                                    val base = dragShelf ?: target.shelf
-                                                    val st = enumOr(base.style, BookcaseStyle.TALL)
-                                                    dragShelf = base.copy(posX = (base.posX + delta.x / roomW).coerceIn(0f, 1f), posY = clampY(if (st.onWall) ItemLayer.WALL else ItemLayer.FLOOR, base.posY + delta.y / roomH, st.h, base.scale))
-                                                }
-                                            }
-                                        }
-                                        ev.changes.forEach { it.consume() }
-                                    }
-                                    val di = dragItem
-                                    val ds = dragShelf
-                                    if (moved) scope.launch {
-                                        di?.let { app.db.rooms().updateItem(it); selected = RoomTarget.Item(it) }
-                                        ds?.let { app.db.shelves().update(it); selected = RoomTarget.Case(it) }
-                                        dragItem = null; dragShelf = null
-                                    } else { dragItem = null; dragShelf = null }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(r.id, r.roomWidth, r.roomDepth) {
+                    awaitEachGesture {
+                        val c0 = cam ?: return@awaitEachGesture
+                        val proj0 = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c0)
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        camJob?.cancel()
+                        val hit = hitTest3D(down.position, currentScene, proj0, includeDecals = currentEdit)
+                        if (currentEdit && hit != null) {
+                            // Einrichten: auswählen und entlang der Wand / über den Boden verschieben
+                            selectedKey = keyOf(hit)
+                            down.consume()
+                            var e: SceneEnt = hit
+                            var moved = false
+                            var lastDist = 0f
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val pressed = ev.changes.filter { it.pressed }
+                                if (pressed.isEmpty()) break
+                                val proj = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, cam ?: c0)
+                                if (pressed.size >= 2) {
+                                    val dist = (pressed[0].position - pressed[1].position).getDistance()
+                                    if (lastDist > 0f && dist > 0f) { applyMove(e, e.a, e.b, dist / lastDist); moved = true }
+                                    lastDist = dist
                                 } else {
-                                    val up = waitForUpOrCancellation() ?: return@awaitEachGesture
-                                    if ((up.position - down.position).getDistance() > viewConfiguration.touchSlop) return@awaitEachGesture
-                                    if (currentEdit) { selected = null; return@awaitEachGesture }
-                                    when (target) {
-                                        is RoomTarget.Case -> closeUp = target.shelf.id
-                                        is RoomTarget.Item -> scope.launch {
-                                            val it = target.item
-                                            val type = itemTypeOf(it.type)
-                                            when {
-                                                type == ItemType.CAT || type == ItemType.DOG -> {
-                                                    val rect = itemRect(it, roomW, roomH) ?: return@launch
-                                                    effects = effects.filter { e -> System.nanoTime() - e.startNanos < 2_000_000_000L } + RoomEffect(Offset(rect.center.x / roomW, rect.top / roomH), System.nanoTime())
-                                                }
-                                                type == ItemType.RECORD_PLAYER -> app.db.rooms().updateItem(it.copy(label = if (it.label == "on") null else "on"))
-                                                type == ItemType.WINDOW -> {
-                                                    val next = Weather.entries[(enumOr(r.weather, Weather.CLEAR).ordinal + 1) % Weather.entries.size]
-                                                    app.db.rooms().update(r.copy(weather = next.name))
-                                                    android.widget.Toast.makeText(context, "Draußen: ${next.label}", android.widget.Toast.LENGTH_SHORT).show()
-                                                }
-                                                (type?.light ?: 0f) > 0f -> app.db.rooms().updateItem(it.copy(label = if (it.isOn) "off" else null))
-                                                type == ItemType.STRING_LIGHTS -> app.db.rooms().updateItem(it.copy(label = if (it.isOn) "off" else null))
+                                    lastDist = 0f
+                                    val ch = pressed[0]
+                                    val prev = ch.previousPosition
+                                    val now = ch.position
+                                    val delta = now - prev
+                                    if (delta.getDistance() > 0f) {
+                                        moved = true
+                                        when (e.wall) {
+                                            Wall.BACK -> { val k = proj.cam.d / proj.f; applyMove(e, e.a + delta.x * k, e.b - delta.y * k) }
+                                            Wall.LEFT, Wall.RIGHT -> {
+                                                val p0 = proj.sideAt(e.wall == Wall.RIGHT, prev.x, prev.y)
+                                                val p1 = proj.sideAt(e.wall == Wall.RIGHT, now.x, now.y)
+                                                if (p0 != null && p1 != null) applyMove(e, e.a + (p1.first - p0.first), e.b + (p1.second - p0.second))
+                                            }
+                                            Wall.FLOOR, Wall.CEILING -> {
+                                                val dz = proj.dz(e.b)
+                                                val h = if (e.wall == Wall.CEILING) (1f - EYE) else (EYE - e.elev).coerceAtLeast(0.05f)
+                                                val dd = (if (e.wall == Wall.CEILING) -delta.y else delta.y) * dz * dz / (h * proj.f)
+                                                applyMove(e, e.a + delta.x * dz / proj.f, e.b + dd)
                                             }
                                         }
-                                        null -> Unit
                                     }
                                 }
+                                // aktuelle Lage für die nächste Bewegung übernehmen
+                                buildScene(r, listOfNotNull(dragItem), listOfNotNull(dragShelf?.let { s -> BookcaseData(s, emptyList()) })).firstOrNull()?.let { ne ->
+                                    e = SceneEnt(e.item?.let { dragItem }, e.type, e.case?.let { c -> c.copy(shelf = dragShelf ?: c.shelf) }, ne.wall, ne.ww, ne.wh, ne.a, ne.b, ne.elev, ne.flip, ne.decal)
+                                }
+                                ev.changes.forEach { it.consume() }
+                            }
+                            val di = dragItem
+                            val ds = dragShelf
+                            if (moved) scope.launch {
+                                di?.let { app.db.rooms().updateItem(it) }
+                                ds?.let { app.db.shelves().update(it) }
+                                dragItem = null; dragShelf = null
+                            } else { dragItem = null; dragShelf = null }
+                            return@awaitEachGesture
+                        }
+                        // Herumgehen: wischen = gehen (hoch/runter) und seitlich treten; Tippen = interagieren
+                        val vt = androidx.compose.ui.input.pointer.util.VelocityTracker()
+                        vt.addPosition(down.uptimeMillis, down.position)
+                        var dragging = false
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: ev.changes.first()
+                            if (!ch.pressed) break
+                            vt.addPosition(ch.uptimeMillis, ch.position)
+                            val total = ch.position - down.position
+                            if (!dragging && total.getDistance() > viewConfiguration.touchSlop) dragging = true
+                            if (dragging) {
+                                val delta = ch.position - ch.previousPosition
+                                val c = cam ?: c0
+                                val proj = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c)
+                                val k = c.d / proj.f
+                                cam = clampCam(Cam(c.x - delta.x * k, c.d - delta.y * k * 1.7f))
+                                ch.consume()
                             }
                         }
-                ) {
-                    RoomCanvas(
-                        room = r,
-                        items = items,
-                        bookcases = bookcases,
-                        modifier = Modifier.fillMaxSize(),
-                        animate = appSettings.roomAnimations,
-                        images = photos,
-                        covers = covers,
-                        selected = if (editMode) selected?.let { sel ->
-                            when (sel) {
-                                is RoomTarget.Item -> RoomTarget.Item(items.firstOrNull { it.id == sel.item.id } ?: sel.item)
-                                is RoomTarget.Case -> RoomTarget.Case(shelvesShown.firstOrNull { it.id == sel.shelf.id } ?: sel.shelf)
+                        if (dragging) {
+                            val v = vt.calculateVelocity()
+                            val c = cam ?: c0
+                            val proj = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c)
+                            val k = c.d / proj.f
+                            val vx = -v.x * k
+                            val vd = -v.y * k * 1.7f
+                            camJob = scope.launch {
+                                launch { androidx.compose.animation.core.animateDecay(c.x, vx, androidx.compose.animation.core.FloatExponentialDecaySpec(2.2f)) { value, _ -> cam = clampCam(Cam(value, cam?.d ?: c.d)) } }
+                                launch { androidx.compose.animation.core.animateDecay(c.d, vd, androidx.compose.animation.core.FloatExponentialDecaySpec(2.2f)) { value, _ -> cam = clampCam(Cam(cam?.x ?: c.x, value)) } }
                             }
-                        } else null,
-                        effects = effects,
-                        refHeight = roomH,
-                    )
-                }
-            }
-            // Hinweis zum Umschauen
-            AnimatedVisibility(showHint && roomW > viewW * 1.1f && !editMode, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
-                Surface(shape = RoundedCornerShape(20.dp), color = Color.Black.copy(alpha = 0.55f)) {
-                    Text(
-                        "← Wische, um dich umzusehen →\nTippe auf ein Regal, um die Bücher anzusehen",
-                        style = TextStyle(fontFamily = Fonts.Lora, fontSize = 14.sp, color = Color(0xFFF6E7C4), textAlign = TextAlign.Center),
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                    )
-                }
-            }
-            // Regale-Schnellzugriff
-            if (!editMode && shelves.isNotEmpty()) {
-                LazyRow(
-                    Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 10.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(shelves, key = { it.id }) { s ->
-                        val count = booksByShelf[s.id]?.size ?: 0
-                        AssistChip(
-                            onClick = {
-                                scope.launch {
-                                    if (overview) overview = false
-                                    if (s.posX >= 0f) scroll.animateScrollTo(((s.posX * roomW) - viewW / 2).roundToInt().coerceIn(0, scroll.maxValue))
-                                    closeUp = s.id
+                            return@awaitEachGesture
+                        }
+                        // Tippen
+                        if (currentEdit) { selectedKey = null; return@awaitEachGesture }
+                        val e = hit ?: return@awaitEachGesture
+                        if (e.case != null) {
+                            val sh = e.case.shelf
+                            if (e.wall == Wall.BACK) {
+                                val dz = e.wh * proj0.f / (0.62f * size.height)
+                                moveCam(Cam(e.a, dz + 0.02f), 420)
+                            }
+                            closeUp = sh.id
+                            return@awaitEachGesture
+                        }
+                        val it = e.item ?: return@awaitEachGesture
+                        val type = e.type
+                        scope.launch {
+                            when {
+                                type == ItemType.CAT || type == ItemType.DOG ->
+                                    effects = effects.filter { x -> System.nanoTime() - x.startNanos < 2_000_000_000L } + Effect3D(e.a, e.elev + e.wh, e.b, System.nanoTime())
+                                type == ItemType.RECORD_PLAYER -> app.db.rooms().updateItem(it.copy(label = if (it.label == "on") null else "on"))
+                                type == ItemType.WINDOW -> {
+                                    val next = Weather.entries[(enumOr(r.weather, Weather.CLEAR).ordinal + 1) % Weather.entries.size]
+                                    app.db.rooms().update(r.copy(weather = next.name))
+                                    android.widget.Toast.makeText(context, "Draußen: ${next.label}", android.widget.Toast.LENGTH_SHORT).show()
                                 }
-                            },
-                            label = { Text("${s.name} · $count") },
-                            leadingIcon = { Box(Modifier.size(12.dp).background(Color(enumOr(s.wood, Wood.WALNUT).base), CircleShape)) },
-                            colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xE62A1E17), labelColor = Color(0xFFF2E3C6)),
-                            border = null,
-                        )
+                                (type?.light ?: 0f) > 0f || type == ItemType.STRING_LIGHTS -> app.db.rooms().updateItem(it.copy(label = if (it.isOn) "off" else null))
+                            }
+                        }
                     }
+                }
+        ) {
+            Room3D(
+                room = r,
+                items = items,
+                bookcases = bookcases,
+                cam = { cam ?: defaultCam(r) },
+                modifier = Modifier.fillMaxSize(),
+                animate = appSettings.roomAnimations,
+                images = photos,
+                covers = covers,
+                selectedKey = if (editMode) selectedKey else null,
+                effects = effects,
+            )
+        }
+        // Hinweis
+        AnimatedVisibility(showHint && !editMode, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
+            Surface(shape = RoundedCornerShape(20.dp), color = Color.Black.copy(alpha = 0.55f)) {
+                Text(
+                    "Wische hoch/runter, um durchs Zimmer zu gehen,\nseitwärts, um dich umzusehen.\nTippe ein Regal an, um die Bücher anzusehen.",
+                    style = TextStyle(fontFamily = Fonts.Lora, fontSize = 14.sp, color = Color(0xFFF6E7C4), textAlign = TextAlign.Center),
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                )
+            }
+        }
+        // Regale-Schnellzugriff
+        if (!editMode && shelves.isNotEmpty()) {
+            LazyRow(
+                Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 10.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(shelves, key = { it.id }) { s ->
+                    val count = booksByShelf[s.id]?.size ?: 0
+                    AssistChip(
+                        onClick = { closeUp = s.id },
+                        label = { Text("${s.name} · $count") },
+                        leadingIcon = { Box(Modifier.size(12.dp).background(Color(enumOr(s.wood, Wood.WALNUT).base), CircleShape)) },
+                        colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xE62A1E17), labelColor = Color(0xFFF2E3C6)),
+                        border = null,
+                    )
                 }
             }
         }
@@ -452,7 +485,7 @@ fun RoomScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val iconColors = IconButtonDefaults.iconButtonColors(contentColor = Color(0xFFF6E7C4))
-            IconButton(onClick = { if (editMode) { editMode = false; selected = null } else onBack() }, colors = iconColors) {
+            IconButton(onClick = { if (editMode) { editMode = false; selectedKey = null } else onBack() }, colors = iconColors) {
                 Icon(if (editMode) Icons.Outlined.Check else Icons.AutoMirrored.Filled.ArrowBack, if (editMode) "Fertig" else "Zurück")
             }
             Column(Modifier.weight(1f)) {
@@ -462,45 +495,41 @@ fun RoomScreen(
                 )
                 val total = booksByShelf.values.sumOf { it.size }
                 Text(
-                    if (editMode) "Ziehen zum Verschieben · zwei Finger zum Skalieren" else "${shelves.size} ${if (shelves.size == 1) "Regal" else "Regale"} · $total ${if (total == 1) "Buch" else "Bücher"}",
+                    if (editMode) "Objekt antippen und ziehen · zwei Finger zum Skalieren" else "${shelves.size} ${if (shelves.size == 1) "Regal" else "Regale"} · $total ${if (total == 1) "Buch" else "Bücher"}",
                     style = TextStyle(fontFamily = Fonts.Nunito, fontSize = 12.sp, color = Color(0xFFE8D6B4), shadow = Shadow(Color.Black, blurRadius = 6f)),
                 )
             }
             if (!editMode) {
-                IconButton(onClick = { overview = !overview }, colors = iconColors) { Icon(if (overview) Icons.Outlined.ZoomInMap else Icons.Outlined.ZoomOutMap, if (overview) "Hineingehen" else "Übersicht") }
+                IconButton(onClick = { moveCam(defaultCam(r)) }, colors = iconColors) { Icon(Icons.Outlined.ZoomOutMap, "Übersicht") }
                 IconButton(onClick = { soundOn = !soundOn }, colors = iconColors) { Icon(if (soundOn) Icons.Outlined.VolumeUp else Icons.Outlined.VolumeOff, "Raumklang") }
-                IconButton(onClick = { editMode = true; overview = false }, colors = iconColors) { Icon(Icons.Outlined.Brush, "Einrichten") }
+                IconButton(onClick = { editMode = true }, colors = iconColors) { Icon(Icons.Outlined.Brush, "Einrichten") }
             } else {
-                TextButton(onClick = onEditRoom) { Text("Wände & Boden", color = Color(0xFFF6E7C4)) }
+                TextButton(onClick = onEditRoom) { Text("Raum & Wände", color = Color(0xFFF6E7C4)) }
             }
         }
 
         // Werkzeuge im Einrichtungsmodus
         if (editMode) {
             Column(Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp), horizontalAlignment = Alignment.End) {
-                val sel = selected
-                when (sel) {
-                    is RoomTarget.Item -> {
-                        val item = items.firstOrNull { it.id == sel.item.id }
-                        if (item != null) ItemToolbar(
-                            item = item,
-                            onChange = { scope.launch { app.db.rooms().updateItem(it) }; selected = RoomTarget.Item(it) },
-                            onDelete = { scope.launch { app.db.rooms().deleteItem(item) }; selected = null },
-                            onPhoto = { pendingPhoto = item; photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                            onFront = { scope.launch { val maxZ = (items.maxOfOrNull { it.z } ?: 0) + 1; app.db.rooms().updateItem(item.copy(z = maxZ)) } },
-                            onBack = { scope.launch { val minZ = (items.minOfOrNull { it.z } ?: 0) - 1; app.db.rooms().updateItem(item.copy(z = minZ)) } },
-                        )
-                    }
-                    is RoomTarget.Case -> {
-                        val shelf = shelves.firstOrNull { it.id == sel.shelf.id }
-                        if (shelf != null) ShelfToolbar(
-                            shelf = shelf,
-                            onChange = { scope.launch { app.db.shelves().update(it) }; selected = RoomTarget.Case(it) },
-                            onSettings = { onEditShelf(shelf.id) },
-                            onDelete = { confirmDeleteShelf = shelf },
-                        )
-                    }
-                    null -> Unit
+                val sel = scene.firstOrNull { keyOf(it) == selectedKey }
+                val selItem = sel?.item
+                val selCase = sel?.case
+                if (selItem != null) ItemToolbar(
+                    item = selItem,
+                    onChange = { scope.launch { app.db.rooms().updateItem(it) } },
+                    onDelete = { scope.launch { app.db.rooms().deleteItem(selItem) }; selectedKey = null },
+                    onPhoto = { pendingPhoto = selItem; photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onFront = { scope.launch { val maxZ = (items.maxOfOrNull { it.z } ?: 0) + 1; app.db.rooms().updateItem(selItem.copy(z = maxZ)) } },
+                    onBack = { scope.launch { val minZ = (items.minOfOrNull { it.z } ?: 0) - 1; app.db.rooms().updateItem(selItem.copy(z = minZ)) } },
+                )
+                if (selCase != null) {
+                    val shelf = selCase.shelf
+                    ShelfToolbar(
+                        shelf = shelf,
+                        onChange = { scope.launch { app.db.shelves().update(it) } },
+                        onSettings = { onEditShelf(shelf.id) },
+                        onDelete = { confirmDeleteShelf = shelves.firstOrNull { it.id == shelf.id } },
+                    )
                 }
                 Spacer(Modifier.height(10.dp))
                 ExtendedFloatingActionButton(onClick = { catalog = true }, icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Hinzufügen") })
@@ -540,28 +569,38 @@ fun RoomScreen(
         onAdd = { type, variant ->
             catalog = false
             scope.launch {
+                val c = cam ?: defaultCam(r)
                 val maxZ = (items.maxOfOrNull { it.z } ?: 0) + 1
-                val y = when (type.layer) {
-                    ItemLayer.WALL -> if (type == ItemType.WINDOW) 0.56f else if (type == ItemType.STRING_LIGHTS) 0.12f else 0.42f
-                    ItemLayer.CEILING -> 0.3f
-                    ItemLayer.DECAL -> 0.95f
-                    ItemLayer.FLOOR -> 0.84f
+                val xFrac = (c.x / r.roomWidth).coerceIn(0.1f, 0.9f)
+                val item = when (type.layer) {
+                    ItemLayer.WALL -> RoomItem(roomId = roomId, type = type.name, x = xFrac, wall = Wall.BACK.name, z = maxZ, variant = variant,
+                        y = when (type) { ItemType.WINDOW -> 0.28f; ItemType.STRING_LIGHTS -> 0.86f; ItemType.CLOCK -> 0.6f; ItemType.WALL_SCONCE -> 0.5f; else -> 0.45f })
+                    ItemLayer.CEILING -> RoomItem(roomId = roomId, type = type.name, x = xFrac, y = 0.5f, wall = Wall.CEILING.name, z = maxZ, variant = variant)
+                    ItemLayer.DECAL -> RoomItem(roomId = roomId, type = type.name, x = xFrac, y = 0.55f, wall = Wall.FLOOR.name, z = -10, variant = variant)
+                    ItemLayer.FLOOR -> RoomItem(roomId = roomId, type = type.name, x = xFrac, y = 0.55f, wall = Wall.FLOOR.name, z = maxZ, variant = variant)
                 }
-                val item = RoomItem(roomId = roomId, type = type.name, x = 0.5f, y = y, z = maxZ, variant = variant)
                 if (type == ItemType.PHOTO) {
                     pendingPhoto = item
                     photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 } else {
                     val id = app.db.rooms().insertItem(item)
-                    selected = RoomTarget.Item(item.copy(id = id))
+                    selectedKey = "i$id"
                 }
             }
         },
         onAddShelf = { style ->
             catalog = false
             scope.launch {
+                val used = normShelves.map { it.wallOf() }
+                val wall = when {
+                    style == BookcaseStyle.WALL -> Wall.BACK
+                    Wall.LEFT !in used -> Wall.LEFT
+                    Wall.RIGHT !in used -> Wall.RIGHT
+                    else -> Wall.BACK
+                }
                 val id = app.db.shelves().insert(
-                    Shelf(roomId = roomId, name = "Neues Regal", wood = Wood.entries[shelves.size % Wood.entries.size].name, fileTypes = DefaultFileTypes, sortIndex = shelves.size, style = style.name, posX = 0.5f, posY = if (style.onWall) 0.5f else FLOOR_Y + 0.06f)
+                    Shelf(roomId = roomId, name = "Neues Regal", wood = Wood.entries[shelves.size % Wood.entries.size].name, fileTypes = DefaultFileTypes, sortIndex = shelves.size, style = style.name,
+                        posX = 0.5f, posY = if (style.onWall) 0.45f else 0f, wall = wall.name)
                 )
                 onEditShelf(id)
             }
@@ -572,17 +611,19 @@ fun RoomScreen(
             onDismissRequest = { confirmDeleteShelf = null },
             title = { Text("Regal entfernen?") },
             text = { Text("„${s.name}“ verschwindet aus dem Zimmer. Deine Dateien, Notizen und Lieblingsstellen bleiben erhalten.") },
-            confirmButton = { TextButton(onClick = { scope.launch { app.db.shelves().delete(s) }; selected = null; confirmDeleteShelf = null }) { Text("Entfernen") } },
+            confirmButton = { TextButton(onClick = { scope.launch { app.db.shelves().delete(s) }; selectedKey = null; confirmDeleteShelf = null }) { Text("Entfernen") } },
             dismissButton = { TextButton(onClick = { confirmDeleteShelf = null }) { Text("Behalten") } },
         )
     }
 }
 
-private fun clampY(layer: ItemLayer?, y: Float, h: Float, scale: Float): Float = when (layer) {
-    ItemLayer.WALL -> y.coerceIn(h * scale + 0.03f, FLOOR_Y - 0.02f)
-    ItemLayer.CEILING -> y.coerceIn(h * scale + 0.04f, 0.65f)
-    ItemLayer.DECAL -> y.coerceIn(FLOOR_Y + 0.08f, 1.05f)
-    else -> y.coerceIn(FLOOR_Y + 0.015f, 1.0f)
+@Composable
+private fun WallChooser(current: Wall, allowFloor: Boolean, onPick: (Wall) -> Unit) {
+    Row(Modifier.padding(horizontal = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOfNotNull(Wall.LEFT, Wall.BACK, Wall.RIGHT, if (allowFloor) Wall.FLOOR else null).forEach { w ->
+            androidx.compose.material3.FilterChip(selected = current == w, onClick = { onPick(w) }, label = { Text(w.label) })
+        }
+    }
 }
 
 @Composable
@@ -610,6 +651,14 @@ private fun ItemToolbar(
                 if (type.light > 0f || type == ItemType.STRING_LIGHTS) IconButton(onClick = { onChange(item.copy(label = if (item.isOn) "off" else null)) }) { Icon(Icons.Outlined.Lightbulb, "Licht an/aus") }
                 if (type == ItemType.PHOTO) IconButton(onClick = onPhoto) { Icon(Icons.Outlined.Image, "Bild wählen") }
                 IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, "Entfernen") }
+            }
+            if (type.layer == ItemLayer.WALL || type.layer == ItemLayer.FLOOR) WallChooser(item.wallOf(), allowFloor = type.layer == ItemLayer.FLOOR || type == ItemType.WINDOW && false) { w ->
+                onChange(item.copy(wall = w.name, x = if (w == Wall.LEFT || w == Wall.RIGHT) 0.45f else item.x, y = if (w == Wall.FLOOR) 0.5f else if (type.layer == ItemLayer.FLOOR) 0f else item.y.coerceAtMost(0.7f), elev = 0f))
+            }
+            if (item.wallOf() == Wall.FLOOR && type.layer == ItemLayer.FLOOR) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
+                Text("Höhe", style = MaterialTheme.typography.labelMedium)
+                TextButton(onClick = { onChange(item.copy(elev = (item.elev - 0.04f).coerceAtLeast(0f))) }) { Text("▼ tiefer") }
+                TextButton(onClick = { onChange(item.copy(elev = (item.elev + 0.04f).coerceAtMost(0.9f))) }) { Text("▲ höher") }
             }
             if (colors) Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 (listOf(0) + CurtainPalette).forEach { c ->
@@ -642,8 +691,8 @@ private fun ShelfToolbar(shelf: Shelf, onChange: (Shelf) -> Unit, onSettings: ()
                         BookcaseStyle.entries.forEach { st ->
                             DropdownMenuItem(text = { Text(st.label) }, onClick = {
                                 styleMenu = false
-                                val y = if (st.onWall) shelf.posY.coerceAtMost(FLOOR_Y - 0.03f).coerceAtLeast(st.h + 0.05f) else shelf.posY.coerceAtLeast(FLOOR_Y + 0.02f)
-                                onChange(shelf.copy(style = st.name, posY = y))
+                                val wall = if (st.onWall && shelf.wallOf() == Wall.FLOOR) Wall.BACK.name else shelf.wallOf().name
+                                onChange(shelf.copy(style = st.name, wall = wall, posY = if (st.onWall) 0.45f else if (shelf.wallOf() == Wall.FLOOR) shelf.posY else 0f))
                             })
                         }
                     }
@@ -661,6 +710,10 @@ private fun ShelfToolbar(shelf: Shelf, onChange: (Shelf) -> Unit, onSettings: ()
                         Wood.entries.forEach { w -> DropdownMenuItem(text = { Text(w.label) }, leadingIcon = { Box(Modifier.size(16.dp).background(Color(w.base), CircleShape)) }, onClick = { woodMenu = false; onChange(shelf.copy(wood = w.name)) }) }
                     }
                 }
+            }
+            WallChooser(shelf.wallOf(), allowFloor = !enumOr(shelf.style, BookcaseStyle.TALL).onWall) { w ->
+                val st = enumOr(shelf.style, BookcaseStyle.TALL)
+                onChange(shelf.copy(wall = w.name, posX = 0.5f, posY = if (w == Wall.FLOOR) 0.5f else if (st.onWall) 0.45f else 0f))
             }
             Row {
                 IconButton(onClick = onSettings) { Icon(Icons.Outlined.Tune, "Ordner & Dateitypen") }

@@ -93,6 +93,25 @@ fun SettingsScreen(onBack: () -> Unit) {
             SwitchRow("Raumklang beim Betreten", "Jedes Zimmer spielt leise seinen Klang", s.roomSounds) { v -> app.settings.updateApp { it.copy(roomSounds = v) } }
             SwitchRow("Zimmerklang beim Lesen", "Ohne eigene Klangkulisse spielt leise der Klang des Zimmers, aus dem das Buch stammt", s.roomAmbienceInReader) { v -> app.settings.updateApp { it.copy(roomAmbienceInReader = v) } }
 
+            Section("Flur")
+            Text("So sieht der Gang mit deinen Zimmertüren aus.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Tapete", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
+            com.lesehaus.app.ui.room.ColorRow(com.lesehaus.app.data.WallPalette, s.hallWall) { c -> app.settings.updateApp { it.copy(hallWall = c) } }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+                com.lesehaus.app.data.WallPattern.entries.forEach { p -> FilterChip(selected = s.hallPattern == p.name, onClick = { app.settings.updateApp { it.copy(hallPattern = p.name) } }, label = { Text(p.label) }) }
+            }
+            Text("Boden", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.lesehaus.app.data.FloorType.entries.forEach { f -> FilterChip(selected = s.hallFloor == f.name, onClick = { app.settings.updateApp { it.copy(hallFloor = f.name) } }, label = { Text(f.label) }) }
+            }
+            Text("Decke", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.lesehaus.app.ui.room.Ceiling.entries.forEach { c -> FilterChip(selected = s.hallCeiling == c.name, onClick = { app.settings.updateApp { it.copy(hallCeiling = c.name) } }, label = { Text(c.label) }) }
+            }
+            Text("Läufer & Vorhänge", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
+            com.lesehaus.app.ui.room.ColorRow(com.lesehaus.app.data.CurtainPalette, s.hallRunner) { c -> app.settings.updateApp { it.copy(hallRunner = c) } }
+            SwitchRow("Holzvertäfelung im Flur", null, s.hallWainscot) { v -> app.settings.updateApp { it.copy(hallWainscot = v) } }
+
             Section("Bibliothek")
             SwitchRow("Regale automatisch aktualisieren", "Beim Betreten eines Zimmers nach neuen Büchern suchen", s.autoScan) { v -> app.settings.updateApp { it.copy(autoScan = v) } }
             SwitchRow("Cover online suchen", "Fehlende Cover bei Open Library & Google Books finden (Titel/Autor werden übertragen)", s.onlineCovers) { v -> app.settings.updateApp { it.copy(onlineCovers = v) } }

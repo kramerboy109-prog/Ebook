@@ -111,14 +111,20 @@ class AppContainer(val context: Context) {
                 val st = com.lesehaus.app.data.enumOr(s.style, com.lesehaus.app.ui.shelf.BookcaseStyle.TALL)
                 val x = com.lesehaus.app.ui.room.freeSpot(st.w * s.scale + 0.05f, room.roomWidth, occupied)
                 occupied += (x * room.roomWidth - st.w / 2 to x * room.roomWidth + st.w / 2)
-                db.shelves().update(s.copy(posX = x, posY = if (st.onWall) 0.5f else com.lesehaus.app.ui.room.FLOOR_Y + 0.04f))
+                db.shelves().update(s.copy(posX = x, posY = if (st.onWall) 0.45f else 0f, wall = if (s.wall.isEmpty()) "BACK" else s.wall))
             }
             return
         }
-        val setup = com.lesehaus.app.ui.room.defaultSetup(room, shelves)
-        db.rooms().insertItems(setup.items)
-        setup.shelves.forEach { db.shelves().update(it) }
-        db.rooms().update(room.copy(decorated = true, roomWidth = setup.roomWidth))
+        val setup = com.lesehaus.app.ui.room.defaultSetup(room, emptyList())
+        db.rooms().insertItems(com.lesehaus.app.ui.room.normalizeItems(setup.items))
+        // Regale stehen räumlich an den Seitenwänden (danach an der Rückwand)
+        val walls = listOf("LEFT", "RIGHT")
+        shelves.forEachIndexed { i, s ->
+            val st = com.lesehaus.app.data.enumOr(s.style, com.lesehaus.app.ui.shelf.BookcaseStyle.TALL)
+            val wall = walls.getOrNull(i) ?: "BACK"
+            db.shelves().update(s.copy(wall = wall, posX = if (wall == "BACK") (0.15f + 0.2f * (i - 2)).coerceAtMost(0.85f) else 0.42f, posY = if (st.onWall) 0.45f else 0f))
+        }
+        db.rooms().update(room.copy(decorated = true, roomWidth = setup.roomWidth.coerceAtMost(2.2f)))
     }
 
     /** Einrichtung auf die Vorlage zurücksetzen. */

@@ -346,7 +346,8 @@ class ReaderViewModel(
 
     private fun speakChapter(chapter: Int, from: Int) {
         val ch = chapters.getOrNull(chapter) ?: return
-        tts.speak(chapter, ch.text, from, paragraphsOf(ch), settings.value, app.settings.app.value.aiKey)
+        val a = app.settings.app.value
+        tts.speak(chapter, ch.text, from, paragraphsOf(ch), settings.value, AiKeys(a.aiKey, a.geminiKey))
     }
 
     fun startTts() {

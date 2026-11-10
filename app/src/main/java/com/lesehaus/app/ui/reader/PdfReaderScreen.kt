@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -418,6 +419,12 @@ private fun SliderJump(vm: PdfViewModel, visible: Boolean, onJump: (Int) -> Unit
                 Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 18.dp, vertical = 8.dp)) {
                     Text("Seite ${pos.roundToInt() + 1} / ${vm.pageCount}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.align(Alignment.CenterHorizontally))
                     Slider(value = pos, onValueChange = { pos = it }, onValueChangeFinished = { onJump(pos.roundToInt()) }, valueRange = 0f..(vm.pageCount - 1).toFloat())
+                    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+                        listOf(-50, -20, -10, -5, 5, 10, 20, 50).forEach { n ->
+                            val target = vm.currentPage + n
+                            androidx.compose.material3.AssistChip(onClick = { onJump(target.coerceIn(0, vm.pageCount - 1)) }, enabled = target in 0 until vm.pageCount, label = { Text(if (n > 0) "+$n" else "$n") })
+                        }
+                    }
                 }
             }
         }

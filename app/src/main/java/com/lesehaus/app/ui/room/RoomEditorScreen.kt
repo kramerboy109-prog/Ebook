@@ -156,9 +156,19 @@ fun RoomEditorScreen(roomId: Long, onBack: () -> Unit, onDeleted: () -> Unit, on
                 Slider(value = r.lightLevel, onValueChange = { v -> upd { it.copy(lightLevel = v) } })
                 Text("Wärme", style = MaterialTheme.typography.labelLarge)
                 Slider(value = r.lightWarmth, onValueChange = { v -> upd { it.copy(lightWarmth = v) } })
-                Section("Zimmergröße")
-                Text("Wie weit du dich im Zimmer umschauen kannst.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(value = r.roomWidth, onValueChange = { v -> upd { it.copy(roomWidth = v) } }, valueRange = 1.0f..3.5f)
+                Section("Raumgröße")
+                Text("Breite: ${"%.1f".format(r.roomWidth * 2.6f)} m", style = MaterialTheme.typography.labelLarge)
+                Slider(value = r.roomWidth, onValueChange = { v -> upd { it.copy(roomWidth = v) } }, valueRange = 1.2f..3.5f)
+                Text("Tiefe: ${"%.1f".format(r.roomDepth * 2.6f)} m", style = MaterialTheme.typography.labelLarge)
+                Slider(value = r.roomDepth, onValueChange = { v -> upd { it.copy(roomDepth = v) } }, valueRange = 1.4f..4.5f)
+                Section("Decke")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Ceiling.entries.forEach { c -> FilterChip(selected = r.ceiling == c.name, onClick = { upd { it.copy(ceiling = c.name) } }, label = { Text(c.label) }) }
+                }
+                com.lesehaus.app.ui.reader.SwitchRow("Holzvertäfelung", "Dunkles Holz im unteren Wandbereich", r.wainscot) { v -> upd { it.copy(wainscot = v) } }
+                Section("Bodenfarbe")
+                ColorRow(listOf(0xFF8A5A35, 0xFFA67B52, 0xFF5B3A26, 0xFF3F271A, 0xFFC9A27E, 0xFF7D6A5A, 0xFF4E5D45, 0xFF34465E, 0xFF8E3D31, 0xFFD9CFC0).map { it.toInt() }, r.floorTint) { c -> upd { it.copy(floorTint = c) } }
+                TextButton(onClick = { upd { it.copy(floorTint = 0) } }) { Text("Standardfarbe des Bodens") }
                 Section("Tür im Flur")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     com.lesehaus.app.data.DoorStyle.entries.forEach { d -> FilterChip(selected = r.doorStyle == d.name, onClick = { upd { it.copy(doorStyle = d.name) } }, label = { Text(d.label) }) }

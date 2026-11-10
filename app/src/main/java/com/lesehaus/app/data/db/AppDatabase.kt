@@ -255,9 +255,21 @@ val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
     }
 }
 
+val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE rooms ADD COLUMN roomDepth REAL NOT NULL DEFAULT 2.2")
+        db.execSQL("ALTER TABLE rooms ADD COLUMN ceiling TEXT NOT NULL DEFAULT 'PLAIN'")
+        db.execSQL("ALTER TABLE rooms ADD COLUMN wainscot INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE rooms ADD COLUMN floorTint INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE shelves ADD COLUMN wall TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE room_items ADD COLUMN wall TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE room_items ADD COLUMN elev REAL NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [ReadingRoom::class, Shelf::class, RoomItem::class, Book::class, ShelfBook::class, Bookmark::class, Annotation::class, Favorite::class, ReadingSession::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -270,7 +282,7 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "lesehaus.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigration()
                 .build()
     }

@@ -266,6 +266,14 @@ fun ReaderBottomBar(
                 onValueChangeFinished = { vm.goToPage(sliderPos.roundToInt()) },
                 valueRange = 0f..(vm.pages.size - 1).toFloat(),
             )
+            // Mehrere Seiten auf einmal blättern
+            var goTo by remember { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                listOf(-50, -20, -10, -5).forEach { n -> JumpChip("$n", vm.currentPage + n >= 0) { vm.goToPage(vm.currentPage + n) } }
+                JumpChip("Seite …", true) { goTo = true }
+                listOf(5, 10, 20, 50).forEach { n -> JumpChip("+$n", vm.currentPage + n < vm.pages.size) { vm.goToPage(vm.currentPage + n) } }
+            }
+            if (goTo) GoToPageDialog(vm.currentPage + 1, vm.pages.size, onDismiss = { goTo = false }) { p -> vm.goToPage(p - 1); goTo = false }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 BarAction(Icons.Outlined.TextFields, "Schrift", false, onSettings)
                 BarAction(Icons.Outlined.Palette, "Farben", false, onTheme)
@@ -903,4 +911,44 @@ private fun InfoLine(label: String, value: String) {
         Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(170.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+@Composable
+private fun JumpChip(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (enabled) 1f else 0.4f),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+    }
+}
+
+@Composable
+fun GoToPageDialog(current: Int, total: Int, onDismiss: () -> Unit, onGo: (Int) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val n = text.toIntOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zu Seite springen") },
+        text = {
+            Column {
+                Text("Du bist auf Seite $current von $total.", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text, onValueChange = { v -> text = v.filter { it.isDigit() }.take(6) }, singleLine = true,
+                    label = { Text("Seite (1–$total)") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("Oder in Prozent:", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(10, 25, 50, 75, 90).forEach { pct -> AssistChip(onClick = { onGo(((total - 1) * pct / 100) + 1) }, label = { Text("$pct %") }) }
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = n != null && n in 1..total, onClick = { n?.let(onGo) }) { Text("Springen") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
 }
