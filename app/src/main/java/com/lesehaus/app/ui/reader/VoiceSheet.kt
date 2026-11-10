@@ -1,5 +1,6 @@
 package com.lesehaus.app.ui.reader
 
+import androidx.compose.material3.Button
 import android.content.Intent
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
@@ -96,8 +97,16 @@ fun VoiceSheet(app: AppContainer, s: ReaderSettings, vm: ReaderViewModel, bookLa
     }.sortedWith(compareBy({ it.network }, { -it.quality }, { it.label }))
 
     ModalBottomSheet(onDismissRequest = { vm.tts.stop(); onDismiss() }, sheetState = state) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
-            Text("Vorlesestimme", style = MaterialTheme.typography.titleLarge)
+        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp).padding(bottom = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Vorlesestimme", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                // Direkt mit der gewählten Stimme loslegen
+                Button(onClick = { vm.tts.stop(); onDismiss(); vm.startTts() }) {
+                    Icon(Icons.Filled.PlayArrow, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Vorlesen")
+                }
+            }
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 listOf("SYSTEM" to "Gerät", "GEMINI" to "KI gratis", "AI" to "OpenAI").forEachIndexed { i, (id, l) ->

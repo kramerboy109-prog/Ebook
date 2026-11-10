@@ -622,8 +622,6 @@ fun Room3D(
     covers: Map<String, ImageBitmap> = emptyMap(),
     selectedKey: String? = null,
     effects: List<Effect3D> = emptyList(),
-    /** Zusätzliche feste Ausstattung (z. B. Türen im Flur), gezeichnet nach den Wänden. */
-    extra: (DrawScope.(Proj) -> Unit)? = null,
 ) {
     val time by produceState(0f, animate) {
         if (animate) {
@@ -641,7 +639,6 @@ fun Room3D(
                 val proj = Proj(size.width, size.height, room.roomWidth, room.roomDepth, cam())
                 val ctx = DrawCtx(room, 1f, images, particles)
                 drawShell(room, tex, proj)
-                extra?.invoke(this, proj)
                 scene.sortedByDescending { sceneDepth(it, proj) }.forEach { drawEntStatic(it, proj, ctx, covers) }
             }
         )

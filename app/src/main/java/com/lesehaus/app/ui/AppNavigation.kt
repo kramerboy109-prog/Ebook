@@ -127,7 +127,6 @@ fun AppNavigation() {
                 roomId = id,
                 onBack = { nav.popBackStack() },
                 onEditRoom = { nav.navigate("roomEdit/$id") },
-                onHallStyle = { nav.navigate("settings") },
                 onEditShelf = { nav.navigate("shelfEdit/$it") },
                 onOpenBook = { nav.openBook(it) },
             )

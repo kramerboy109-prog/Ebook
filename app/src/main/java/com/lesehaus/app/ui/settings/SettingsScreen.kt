@@ -96,31 +96,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SwitchRow("Zimmerklang beim Lesen", "Ohne eigene Klangkulisse spielt leise der Klang des Zimmers, aus dem das Buch stammt", s.roomAmbienceInReader) { v -> app.settings.updateApp { it.copy(roomAmbienceInReader = v) } }
 
             Section("Flur")
-            Text("So sieht der Gang mit deinen Zimmertüren aus.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            val previewRooms by app.db.rooms().observeRooms().collectAsState(initial = emptyList())
-            androidx.compose.foundation.layout.Box(
-                Modifier.fillMaxWidth().padding(top = 8.dp).height(220.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-            ) {
-                com.lesehaus.app.ui.home.Hallway3D(
-                    rooms = previewRooms, settings = s, animate = false, modifier = Modifier.fillMaxSize(),
-                    onNearest = {}, onEnter = {}, onEdit = {}, onAddRoom = {},
-                )
-            }
-            Text("Form", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 10.dp))
-            Text("Breite: ${"%.1f".format(s.hallWidth * 2.2f)} m", style = MaterialTheme.typography.bodyMedium)
-            Slider(value = s.hallWidth, onValueChange = { v -> app.settings.updateApp { it.copy(hallWidth = v) } }, valueRange = 1.1f..2.8f)
-            Text("Abstand der Türen: ${"%.1f".format(s.hallSpacing * 2.2f)} m", style = MaterialTheme.typography.bodyMedium)
-            Slider(value = s.hallSpacing, onValueChange = { v -> app.settings.updateApp { it.copy(hallSpacing = v) } }, valueRange = 0.85f..2.2f)
-            Text("Türen", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                com.lesehaus.app.ui.home.HallSides.entries.forEach { o -> FilterChip(selected = s.hallSides == o.name, onClick = { app.settings.updateApp { it.copy(hallSides = o.name) } }, label = { Text(o.label) }) }
-            }
-            Text("Am Ende des Flurs", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                com.lesehaus.app.ui.home.HallEnd.entries.forEach { o -> FilterChip(selected = s.hallEnd == o.name, onClick = { app.settings.updateApp { it.copy(hallEnd = o.name) } }, label = { Text(o.label) }) }
-            }
-            Text("Eigene Möbel, Bilder, Pflanzen und Regale stellst du über den Pinsel oben auf der Startseite in den Flur.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            Text("So sieht der Flur mit deinen Zimmertüren aus.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Tapete", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
             com.lesehaus.app.ui.room.ColorRow(com.lesehaus.app.data.WallPalette, s.hallWall) { c -> app.settings.updateApp { it.copy(hallWall = c) } }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {

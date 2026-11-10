@@ -1,6 +1,5 @@
 package com.lesehaus.app.ui.room
 
-import com.lesehaus.app.ui.home.drawHallFixtures
 
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -69,7 +68,6 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VolumeOff
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.ZoomInMap
-import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -184,7 +182,6 @@ fun RoomScreen(
     onEditRoom: () -> Unit,
     onEditShelf: (Long) -> Unit,
     onOpenBook: (Book) -> Unit,
-    onHallStyle: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.app
@@ -217,7 +214,6 @@ fun RoomScreen(
     var pendingPhoto by remember { mutableStateOf<RoomItem?>(null) }
     var showHint by remember { mutableStateOf(true) }
     var cam by remember { mutableStateOf<Cam?>(null) }
-    var camJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     LaunchedEffect(shelves.map { it.id }) {
         if (appSettings.autoScan) shelves.filter { it.folderList.isNotEmpty() && System.currentTimeMillis() - it.lastScan > 10 * 60_000 }.forEach { app.scanShelf(it) }
@@ -257,27 +253,8 @@ fun RoomScreen(
         }
     }
 
-    val dbRoom = room ?: return
-    // Der Flur wird mit seiner Form aus den Einstellungen (Breite, Länge, Türen) eingerichtet
-    val isHall = dbRoom.type == "HALL"
-    val allRooms by app.db.rooms().observeRooms().collectAsState(initial = emptyList())
-    val r = remember(dbRoom, allRooms, appSettings) {
-        if (isHall) com.lesehaus.app.ui.home.hallStyleRoom(appSettings, com.lesehaus.app.ui.home.hallLayout(allRooms, appSettings), dbRoom) else dbRoom
-    }
-    LaunchedEffect(isHall) { if (isHall) { editMode = true; showHint = false } }
+    val r = room ?: return
     LaunchedEffect(r.id) { if (cam == null) cam = defaultCam(r) }
-    val (xRange, minD, maxD) = camLimits(r)
-    fun clampCam(c: Cam) = Cam(c.x.coerceIn(xRange.start, xRange.endInclusive), c.d.coerceIn(minD, maxD), c.yaw.coerceIn(-MAX_YAW, MAX_YAW))
-    fun moveCam(to: Cam, ms: Int = 520) {
-        camJob?.cancel()
-        val from = cam ?: defaultCam(r)
-        camJob = scope.launch {
-            androidx.compose.animation.core.animate(0f, 1f, animationSpec = tween(ms, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { v, _ ->
-                cam = clampCam(Cam(from.x + (to.x - from.x) * v, from.d + (to.d - from.d) * v, from.yaw + (to.yaw - from.yaw) * v))
-            }
-        }
-    }
-
     val normItems = remember(dbItems) { normalizeItems(dbItems) }
     val items = remember(normItems, dragItem) { dragItem?.let { d -> normItems.map { if (it.id == d.id) d else it } } ?: normItems }
     val normShelves = remember(shelves) { shelves.map { normalizeShelf(it) } }
@@ -323,7 +300,6 @@ fun RoomScreen(
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val c0 = cam ?: defaultCam(r)
                         val proj0 = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c0)
-                        camJob?.cancel()
                         val hit = hitTest3D(down.position, currentScene, proj0, includeDecals = currentEdit)
                         if (currentEdit && hit != null) {
                             // Einrichten: auswählen und entlang der Wand / über den Boden verschieben
@@ -389,62 +365,20 @@ fun RoomScreen(
                             } else { dragItem = null; dragShelf = null }
                             return@awaitEachGesture
                         }
-                        // Herumgehen: wischen = gehen (hoch/runter) und seitlich treten; Tippen = interagieren
-                        val vt = androidx.compose.ui.input.pointer.util.VelocityTracker()
-                        vt.addPosition(down.uptimeMillis, down.position)
-                        var dragging = false
+                        // Feste Ansicht: nur Tippen zählt (kein Herumlaufen mehr)
+                        var moved = false
                         while (true) {
                             val ev = awaitPointerEvent()
                             val ch = ev.changes.firstOrNull { it.id == down.id } ?: ev.changes.first()
                             if (!ch.pressed) break
-                            vt.addPosition(ch.uptimeMillis, ch.position)
-                            val total = ch.position - down.position
-                            if (!dragging && total.getDistance() > viewConfiguration.touchSlop) dragging = true
-                            if (dragging) {
-                                // hoch/runter = in Blickrichtung gehen, links/rechts = umdrehen
-                                val delta = ch.position - ch.previousPosition
-                                val c = cam ?: c0
-                                val proj = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c)
-                                val step = -delta.y * c.d.coerceAtMost(3f) / proj.f * 1.7f
-                                val yaw = (c.yaw - delta.x * 0.0042f).coerceIn(-MAX_YAW, MAX_YAW)
-                                cam = clampCam(Cam(c.x + step * kotlin.math.sin(c.yaw), c.d - step * kotlin.math.cos(c.yaw), yaw))
-                                ch.consume()
-                            }
+                            if ((ch.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
                         }
-                        if (dragging) {
-                            val v = vt.calculateVelocity()
-                            val c = cam ?: c0
-                            val proj = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c)
-                            val vStep = -v.y * c.d.coerceAtMost(3f) / proj.f * 1.7f
-                            val vYaw = -v.x * 0.0042f
-                            camJob = scope.launch {
-                                launch {
-                                    var last = 0f
-                                    androidx.compose.animation.core.animateDecay(0f, vStep * 0.6f, androidx.compose.animation.core.FloatExponentialDecaySpec(4f)) { value, _ ->
-                                        val dv = value - last; last = value
-                                        val cc = cam ?: c
-                                        cam = clampCam(Cam(cc.x + dv * kotlin.math.sin(cc.yaw), cc.d - dv * kotlin.math.cos(cc.yaw), cc.yaw))
-                                    }
-                                }
-                                launch {
-                                    androidx.compose.animation.core.animateDecay(c.yaw, vYaw, androidx.compose.animation.core.FloatExponentialDecaySpec(3f)) { value, _ ->
-                                        val cc = cam ?: c
-                                        cam = cc.copy(yaw = value.coerceIn(-MAX_YAW, MAX_YAW))
-                                    }
-                                }
-                            }
-                            return@awaitEachGesture
-                        }
+                        if (moved) return@awaitEachGesture
                         // Tippen
                         if (currentEdit) { selectedKey = null; return@awaitEachGesture }
                         val e = hit ?: return@awaitEachGesture
                         if (e.case != null) {
-                            val sh = e.case.shelf
-                            if (e.wall == Wall.BACK) {
-                                val dz = e.wh * proj0.f / (0.62f * size.height)
-                                moveCam(Cam(e.a, dz + 0.02f), 420)
-                            }
-                            closeUp = sh.id
+                            closeUp = e.case.shelf.id
                             return@awaitEachGesture
                         }
                         val it = e.item ?: return@awaitEachGesture
@@ -476,14 +410,13 @@ fun RoomScreen(
                 covers = covers,
                 selectedKey = if (editMode) selectedKey else null,
                 effects = effects,
-                extra = if (isHall) { proj -> drawHallFixtures(proj, allRooms, appSettings, r) } else null,
             )
         }
         // Hinweis
         AnimatedVisibility(showHint && !editMode, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
             Surface(shape = RoundedCornerShape(20.dp), color = Color.Black.copy(alpha = 0.55f)) {
                 Text(
-                    "Wische hoch/runter, um zu gehen,\nnach links/rechts, um dich umzudrehen.\nTippe ein Regal an, um die Bücher anzusehen.",
+                    "Tippe ein Regal an, um die Bücher anzusehen.\nMit dem Pinsel oben richtest du das Zimmer ein.",
                     style = TextStyle(fontFamily = Fonts.Lora, fontSize = 14.sp, color = Color(0xFFF6E7C4), textAlign = TextAlign.Center),
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                 )
@@ -534,11 +467,10 @@ fun RoomScreen(
                 )
             }
             if (!editMode) {
-                IconButton(onClick = { moveCam(defaultCam(r)) }, colors = iconColors) { Icon(Icons.Outlined.ZoomOutMap, "Übersicht") }
                 IconButton(onClick = { soundOn = !soundOn }, colors = iconColors) { Icon(if (soundOn) Icons.Outlined.VolumeUp else Icons.Outlined.VolumeOff, "Raumklang") }
                 IconButton(onClick = { editMode = true }, colors = iconColors) { Icon(Icons.Outlined.Brush, "Einrichten") }
             } else {
-                TextButton(onClick = if (isHall) onHallStyle else onEditRoom) { Text(if (isHall) "Flurform & Wände" else "Raum & Wände", color = Color(0xFFF6E7C4)) }
+                TextButton(onClick = onEditRoom) { Text("Raum & Wände", color = Color(0xFFF6E7C4)) }
             }
         }
 

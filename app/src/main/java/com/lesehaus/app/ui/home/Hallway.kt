@@ -69,8 +69,20 @@ import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.sin
 
-private val HallWall = Color(0xFFD9C7A6)
-private val HallPanel = Color(0xFF4E5D45)
+/** Farben des Flurs (aus den Einstellungen). */
+data class HallStyle(
+    val wall: Color = Color(0xFFD9C7A6),
+    val runner: Color = Color(0xFF7B2D3B),
+    val floor: Color = Color(0xFF8A5A35),
+    val wainscot: Boolean = true,
+)
+
+fun hallStyleOf(s: com.lesehaus.app.data.AppSettings) = HallStyle(
+    wall = Color(s.hallWall),
+    runner = Color(s.hallRunner),
+    floor = when (s.hallFloor) { "STONE" -> Color(0xFF8E8A84); "TILES" -> Color(0xFF9C8F7E); "CARPET" -> Color(s.hallRunner).darken(0.2f); "OAK", "LIGHT" -> Color(0xFFB08A5E); else -> Color(0xFF8A5A35) },
+    wainscot = s.hallWainscot,
+)
 
 fun hallTime(): TimeOfDay {
     val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -207,4 +219,243 @@ private fun DrawScope.drawDoorBody(style: DoorStyle, c: Color, w: Float, h: Floa
     }
     // dezenter Schatten links (Tiefe)
     drawRect(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.25f), Color.Transparent), 0f, w * 0.08f), size = Size(w * 0.08f, h))
+}
+
+
+/**
+ * Der Flur: Man wischt von Tür zu Tür. Antippen öffnet die Tür (mit Blick ins Zimmer),
+ * langes Drücken öffnet die Zimmer-Einstellungen.
+ */
+@Composable
+fun Hallway(
+    rooms: List<ReadingRoom>,
+    itemsByRoom: Map<Long, List<RoomItem>>,
+    pager: PagerState,
+    animate: Boolean,
+    modifier: Modifier = Modifier,
+    onEnter: (ReadingRoom) -> Unit,
+    onEdit: (ReadingRoom) -> Unit,
+    onAddRoom: () -> Unit,
+    style: HallStyle = HallStyle(),
+) {
+    val scope = rememberCoroutineScope()
+    val time by produceState(0f, animate) {
+        if (animate) {
+            val s = withInfiniteAnimationFrameNanos { it }
+            while (true) withInfiniteAnimationFrameNanos { value = (it - s) / 1e9f }
+        }
+    }
+    val tod = remember { hallTime() }
+    val openingIndex = remember { mutableIntState(-1) }
+    val doorAnim = remember { Animatable(0f) }
+    val zoomAnim = remember { Animatable(0f) }
+    BoxWithConstraints(modifier.background(style.wall.darken(0.6f))) {
+        // durchgehende Flurwand hinter den Türen
+        Canvas(Modifier.fillMaxSize()) { drawHallSegment(-1, tod, time, style) }
+        HorizontalPager(
+            state = pager,
+            contentPadding = PaddingValues(horizontal = maxWidth * 0.17f),
+            modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = openingIndex.intValue < 0,
+        ) { page ->
+            val room = rooms.getOrNull(page)
+            val opening = openingIndex.intValue == page
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        if (opening) {
+                            val z = zoomAnim.value
+                            scaleX = 1f + z * 2.2f; scaleY = scaleX
+                            transformOrigin = TransformOrigin(0.5f, 0.6f)
+                        }
+                    }
+            ) {
+                // Wandabschnitt des Flurs
+                Canvas(Modifier.fillMaxSize()) { drawHallSegment(page, tod, time, style) }
+                val doorW = 0.6f
+                val doorH = 0.56f
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val dw = maxWidth * doorW
+                    val dh = maxHeight * doorH
+                    val left = (maxWidth - dw) / 2
+                    val top = maxHeight * 0.83f - dh
+                    if (room != null) {
+                        // Zimmer hinter der Tür (sichtbar beim Öffnen und durch Glastüren)
+                        Box(
+                            Modifier
+                                .offset(left, top)
+                                .size(dw, dh)
+                                .clip(doorShape(enumOr(room.doorStyle, DoorStyle.PANEL)))
+                        ) {
+                            RoomScene(room, Modifier.fillMaxSize(), animate = opening || enumOr(room.doorStyle, DoorStyle.PANEL) == DoorStyle.GLASS && animate, items = itemsByRoom[room.id])
+                        }
+                        // Lichtschein unter der Tür
+                        Canvas(Modifier.offset(left, top).size(dw, dh)) {
+                            val glow = (0.35f + room.lightLevel * 0.5f) * (0.9f + 0.1f * sin(time * 3f + page))
+                            drawRect(
+                                Brush.verticalGradient(listOf(Color(0xFFFFC27A).copy(alpha = 0.55f * glow), Color.Transparent), size.height, size.height + size.height * 0.12f),
+                                Offset(-size.width * 0.15f, size.height), Size(size.width * 1.3f, size.height * 0.12f), blendMode = BlendMode.Screen,
+                            )
+                        }
+                        // Türblatt (schwingt beim Öffnen auf)
+                        Box(
+                            Modifier
+                                .offset(left, top)
+                                .size(dw, dh)
+                                .graphicsLayer {
+                                    if (opening) {
+                                        transformOrigin = TransformOrigin(0f, 0.5f)
+                                        rotationY = -doorAnim.value * 105f
+                                        cameraDistance = 10f * density
+                                    }
+                                }
+                                .combinedClickable(
+                                    onClick = {
+                                        if (openingIndex.intValue >= 0) return@combinedClickable
+                                        if (pager.currentPage != page) { scope.launch { pager.animateScrollToPage(page) }; return@combinedClickable }
+                                        scope.launch {
+                                            openingIndex.intValue = page
+                                            doorAnim.snapTo(0f); zoomAnim.snapTo(0f)
+                                            doorAnim.animateTo(1f, tween(650, easing = FastOutSlowInEasing))
+                                            zoomAnim.animateTo(1f, tween(380))
+                                            onEnter(room)
+                                            kotlinx.coroutines.delay(600)
+                                            openingIndex.intValue = -1
+                                            doorAnim.snapTo(0f); zoomAnim.snapTo(0f)
+                                        }
+                                    },
+                                    onLongClick = { onEdit(room) },
+                                )
+                        ) {
+                            Canvas(Modifier.fillMaxSize()) { drawDoor(enumOr(room.doorStyle, DoorStyle.PANEL), doorColor(room), Rect(Offset.Zero, size)) }
+                        }
+                        // Türrahmen, Schild, Fußmatte
+                        Canvas(Modifier.fillMaxSize()) {
+                            val dr = Rect(left.toPx(), top.toPx(), (left + dw).toPx(), (top + dh).toPx())
+                            drawDoorFrame(dr, enumOr(room.doorStyle, DoorStyle.PANEL))
+                            drawDoormat(Rect(dr.left - dr.width * 0.05f, dr.bottom + size.height * 0.035f, dr.right + dr.width * 0.05f, dr.bottom + size.height * 0.09f), Color(room.curtainColor))
+                        }
+                        // Namensschild
+                        Column(
+                            Modifier.offset(y = top - 64.dp).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(
+                                Modifier
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                                    .background(Brush.linearGradient(listOf(Color(0xFFE8CC8C), Color(0xFFB08D57), Color(0xFFD9B97F))))
+                                    .padding(horizontal = 16.dp, vertical = 5.dp)
+                            ) {
+                                val type = runCatching { RoomType.valueOf(room.type) }.getOrNull()
+                                Text(
+                                    (type?.emoji?.let { "$it " } ?: "") + room.name,
+                                    style = TextStyle(fontFamily = Fonts.Playfair, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF3B2614)),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    } else {
+                        // „Neues Zimmer“: Tür-Umriss zum Einbauen
+                        Box(
+                            Modifier.offset(left, top).size(dw, dh).combinedClickable(onClick = onAddRoom),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                drawRoundRect(Color.White.copy(alpha = 0.08f), cornerRadius = CornerRadius(12f))
+                                drawRoundRect(Color(0xFFF6E7C4).copy(alpha = 0.6f), style = Stroke(4f, pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(22f, 14f))), cornerRadius = CornerRadius(12f))
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("+", style = TextStyle(fontFamily = Fonts.Playfair, fontSize = 54.sp, color = Color(0xFFF6E7C4)))
+                                Text("Neues Zimmer\neinrichten", style = TextStyle(fontFamily = Fonts.Lora, fontSize = 15.sp, color = Color(0xFFF6E7C4), textAlign = TextAlign.Center, shadow = Shadow(Color.Black, blurRadius = 6f)))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Seitenpunkte
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            repeat(rooms.size + 1) { i ->
+                Box(
+                    Modifier
+                        .size(if (i == pager.currentPage) 9.dp else 6.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFF6E7C4).copy(alpha = if (i == pager.currentPage) 0.95f else 0.4f))
+                )
+            }
+        }
+    }
+}
+
+
+private fun mutableIntState(v: Int) = androidx.compose.runtime.mutableIntStateOf(v)
+
+private fun doorShape(style: DoorStyle) = when (style) {
+    DoorStyle.ARCH -> androidx.compose.foundation.shape.RoundedCornerShape(topStartPercent = 50, topEndPercent = 50)
+    else -> androidx.compose.ui.graphics.RectangleShape
+}
+
+/** Ein Stück Flurwand mit Wandvertäfelung, Läufer, Wandlampe und kleiner Deko. */
+private fun DrawScope.drawHallSegment(index: Int, tod: TimeOfDay, t: Float, st: HallStyle) {
+    val HallWall = st.wall
+    val HallPanel = if (st.wainscot) Color(0xFF5B3A26) else st.wall.darken(0.18f)
+    val w = size.width
+    val h = size.height
+    val floorY = h * 0.83f
+    // Tapete mit Streifen
+    drawRect(Brush.verticalGradient(listOf(HallWall.darken(0.25f), HallWall.darken(0.05f)), 0f, floorY), size = Size(w, floorY))
+    var x = 0f
+    while (x < w) { drawRect(HallWall.lighten(0.06f), Offset(x, 0f), Size(w / 24f, floorY)); x += w / 12f }
+    // Stuck
+    drawRect(HallWall.darken(0.4f), Offset(0f, 0f), Size(w, h * 0.025f))
+    drawRect(HallWall.lighten(0.2f), Offset(0f, h * 0.025f), Size(w, h * 0.008f))
+    // Vertäfelung unten
+    val panelTop = h * 0.6f
+    drawRect(HallPanel, Offset(0f, panelTop), Size(w, floorY - panelTop))
+    drawRect(HallPanel.lighten(0.15f), Offset(0f, panelTop - 4f), Size(w, 8f))
+    for (k in 0 until 2) {
+        val pr = Rect(w * (0.04f + k * 0.5f), panelTop + (floorY - panelTop) * 0.15f, w * (0.46f + k * 0.5f), floorY - (floorY - panelTop) * 0.15f)
+        drawRect(HallPanel.darken(0.25f), pr.topLeft, pr.size, style = Stroke(3f))
+    }
+    // Boden (Dielen) und Läufer in Perspektive
+    drawRect(Brush.verticalGradient(listOf(st.floor.darken(0.25f), st.floor), floorY, h), Offset(0f, floorY), Size(w, h - floorY))
+    for (k in 0..8) drawLine(Color(0xFF3F271A).copy(alpha = 0.5f), Offset(w * k / 8f, floorY), Offset(w * k / 8f, h), 1.5f)
+    val runner = Path().apply { moveTo(0f, floorY + (h - floorY) * 0.35f); lineTo(w, floorY + (h - floorY) * 0.35f); lineTo(w, h); lineTo(0f, h); close() }
+    drawPath(runner, st.runner)
+    drawLine(Color(0xFFE2C27E), Offset(0f, floorY + (h - floorY) * 0.45f), Offset(w, floorY + (h - floorY) * 0.45f), 3f)
+    drawLine(Color(0xFFE2C27E), Offset(0f, h * 0.985f), Offset(w, h * 0.985f), 3f)
+    drawRect(Color(0xFF3F271A), Offset(0f, floorY - h * 0.012f), Size(w, h * 0.016f))
+    // Kleine Deko zwischen den Türen (am Seitenrand jedes Abschnitts)
+    when (abs(index * 7 + 3) % 3) {
+        0 -> { // Pflanze
+            val px = w * 0.04f
+            drawRoundRect(Color(0xFFB0643E), Offset(px - w * 0.03f, floorY - h * 0.08f), Size(w * 0.06f, h * 0.08f), CornerRadius(4f))
+            for (k in 0 until 5) drawOval(Color(0xFF4E8A55).lighten(k * 0.04f), Offset(px - w * 0.05f + k * w * 0.012f, floorY - h * (0.2f + (k % 2) * 0.05f)), Size(w * 0.05f, h * 0.12f))
+        }
+        1 -> { // Schirmständer
+            val px = w * 0.035f
+            drawRect(Color(0xFF34465E), Offset(px - w * 0.025f, floorY - h * 0.1f), Size(w * 0.05f, h * 0.1f))
+            drawLine(Color(0xFF2B2B2B), Offset(px, floorY - h * 0.1f), Offset(px - w * 0.01f, floorY - h * 0.2f), 4f)
+            drawArc(Color(0xFF2B2B2B), 180f, 180f, false, Offset(px - w * 0.03f, floorY - h * 0.22f), Size(w * 0.03f, h * 0.03f), style = Stroke(4f))
+        }
+        else -> { // kleines Bild
+            val fr = Rect(w * 0.0f, h * 0.3f, w * 0.06f, h * 0.38f)
+            drawRect(Color(0xFFC09A55), fr.topLeft, fr.size)
+            drawRect(Color(0xFF6F8B60), fr.topLeft + Offset(4f, 4f), Size(fr.width - 8f, fr.height - 8f))
+        }
+    }
+    // Wandleuchte rechts neben der Tür
+    val lx = w * 0.88f
+    val ly = h * 0.33f
+    drawRect(Color(0xFFB08D57), Offset(lx - 4f, ly), Size(8f, h * 0.05f))
+    val shade = Path().apply { moveTo(lx - w * 0.025f, ly - h * 0.01f); lineTo(lx + w * 0.025f, ly - h * 0.01f); lineTo(lx + w * 0.04f, ly - h * 0.06f); lineTo(lx - w * 0.04f, ly - h * 0.06f); close() }
+    drawPath(shade, Color(0xFFF5DDB0))
+    val glow = when (tod) { TimeOfDay.DAY -> 0.18f; TimeOfDay.SUNSET -> 0.35f; TimeOfDay.NIGHT -> 0.55f } * (0.95f + 0.05f * sin(t * 2f + index))
+    drawCircle(Brush.radialGradient(listOf(Color(0xFFFFC27A).copy(alpha = glow), Color.Transparent), Offset(lx, ly - h * 0.03f), w * 0.28f), w * 0.28f, Offset(lx, ly - h * 0.03f), blendMode = BlendMode.Screen)
+    // Tageszeit: nachts dunkler
+    if (tod != TimeOfDay.DAY) drawRect(Color(0xFF0A0604).copy(alpha = if (tod == TimeOfDay.NIGHT) 0.28f else 0.12f))
 }

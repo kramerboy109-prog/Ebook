@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
@@ -161,11 +162,6 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         waitForText("Mein Regal")
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("screens/04b_room_arch_mixed.png")
-        // ein paar Schritte ins Zimmer und nach links gehen
-        compose.onRoot().performTouchInput { swipe(androidx.compose.ui.geometry.Offset(width * 0.5f, height * 0.75f), androidx.compose.ui.geometry.Offset(width * 0.62f, height * 0.62f), 500) }
-        compose.mainClock.advanceTimeBy(1500)
-        compose.waitForIdle()
-        compose.onRoot().captureRoboImage("screens/04c_room_walk.png")
         compose.onNodeWithContentDescription("Einrichten").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Hinzufügen", useUnmergedTree = true).performClick()
@@ -208,11 +204,34 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         compose.onNodeWithContentDescription("Schließen").performClick()
         compose.onRoot().performTouchInput { click(center) }
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("Mehr").performClick()
-        compose.onNodeWithText("Vorlesestimme").performClick()
+        // Stimme/KI direkt aus der unteren Leiste
+        compose.onNodeWithText("Stimme/KI").performClick()
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(800)
         captureScreenRoboImage("screens/09b_voice_sheet.png")
+        compose.onNodeWithText("KI gratis").performClick()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(500)
+        captureScreenRoboImage("screens/09c_voice_gemini.png")
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h640dp-xhdpi")
+    fun readerSmallScreenBigFont() {
+        org.robolectric.RuntimeEnvironment.setFontScale(1.3f)
+        app.settings.updateReader { it.copy(fullscreen = true) }
+        compose.setContent { LesehausTheme(AppThemeMode.LIGHT) { ReaderScreen(bookId, false, {}, {}) } }
+        waitForText("Gregor Samsa", 30_000)
+        compose.waitForIdle()
+        compose.onRoot().performTouchInput { click(center) }
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage("screens/08b_reader_controls_small.png")
+        // alle Hauptfunktionen sind sichtbar und antippbar
+        listOf("Vorlesen", "Stimme/KI", "Schrift", "Farben", "Gemütlich", "Klang").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        compose.onNodeWithText("± Seiten").performClick()
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage("screens/08c_reader_jumps_small.png")
+        compose.onNodeWithText("+10").assertIsDisplayed()
     }
 
     @Test

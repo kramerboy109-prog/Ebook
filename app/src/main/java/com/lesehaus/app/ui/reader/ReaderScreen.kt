@@ -401,6 +401,7 @@ fun ReaderScreen(
                 onTheme = { sheet = ReaderSheet.THEME },
                 onTts = { if (ttsSpeaking) vm.tts.stop() else vm.startTts(); controlsVisible = false },
                 onAmbient = { sheet = ReaderSheet.AMBIENT },
+                onVoice = { sheet = ReaderSheet.VOICE },
             )
         }
         if (ttsSpeaking && !controlsVisible && vm.selection == null) {

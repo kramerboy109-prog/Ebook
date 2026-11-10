@@ -1,5 +1,7 @@
 package com.lesehaus.app.ui.reader
 
+import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.material.icons.outlined.PlayCircle
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -198,6 +200,7 @@ fun ReaderTopBar(
             IconButton(onClick = onBookmark) {
                 Icon(if (bookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, "Lesezeichen", tint = if (bookmarked) Color(0xFF9B2F3F) else MaterialTheme.colorScheme.onSurface)
             }
+            IconButton(onClick = onVoice) { Icon(Icons.Outlined.Headphones, "Vorlesen & Stimme") }
             IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, "Suchen") }
             IconButton(onClick = onToc) { Icon(Icons.AutoMirrored.Outlined.List, "Inhalt") }
             var menu by remember { mutableStateOf(false) }
@@ -206,7 +209,7 @@ fun ReaderTopBar(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Notizen & Markierungen") }, leadingIcon = { Icon(Icons.Outlined.StickyNote2, null) }, onClick = { menu = false; onNotes() })
                     DropdownMenuItem(text = { Text("Buchinfo") }, leadingIcon = { Icon(Icons.Outlined.Info, null) }, onClick = { menu = false; onInfo() })
-                    DropdownMenuItem(text = { Text("Vorlesestimme") }, leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) }, onClick = { menu = false; onVoice() })
+                    DropdownMenuItem(text = { Text("Vorlesestimme & KI-Stimme") }, leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) }, onClick = { menu = false; onVoice() })
                     DropdownMenuItem(text = { Text("Als gelesen markieren") }, leadingIcon = { Icon(Icons.Outlined.TaskAlt, null) }, onClick = { menu = false; onFinished() })
                     if (isPdf) DropdownMenuItem(text = { Text("Original-PDF-Ansicht") }, leadingIcon = { Icon(Icons.Outlined.PictureAsPdf, null) }, onClick = { menu = false; onPdfOriginal() })
                 }
@@ -224,24 +227,52 @@ fun ReaderBottomBar(
     onTheme: () -> Unit,
     onTts: () -> Unit,
     onAmbient: () -> Unit,
+    onVoice: () -> Unit = {},
 ) {
     val ttsOn by vm.tts.speaking.collectAsState()
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.97f),
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.98f),
         shadowElevation = 6.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 12.dp, vertical = 8.dp)) {
+        // Abstand zur Systemleiste auch dann, wenn sie im Vollbild nur kurz eingeblendet wird
+        Column(
+            Modifier
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 14.dp)
+        ) {
+            // 1. Die wichtigsten Funktionen ganz oben – immer gut erreichbar
+            val actions: List<@Composable (Modifier) -> Unit> = listOf(
+                { m -> BarAction(if (ttsOn) Icons.Filled.Stop else Icons.Outlined.PlayCircle, if (ttsOn) "Stopp" else "Vorlesen", ttsOn, onTts, m) },
+                { m -> BarAction(Icons.Outlined.RecordVoiceOver, "Stimme/KI", false, onVoice, m) },
+                { m -> BarAction(Icons.Outlined.TextFields, "Schrift", false, onSettings, m) },
+                { m -> BarAction(Icons.Outlined.Palette, "Farben", false, onTheme, m) },
+                { m -> BarAction(Icons.Outlined.LocalFireDepartment, "Gemütlich", settings.cozyMode, onCozy, m) },
+                { m -> BarAction(Icons.Outlined.MusicNote, "Klang", settings.ambientSound != AmbientSound.NONE, onAmbient, m) },
+            )
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                // Auf schmalen Bildschirmen oder mit großer Schrift: zwei Reihen, damit nichts abgeschnitten wird
+                val perRow = if (maxWidth / 6 < 74.dp * androidx.compose.ui.platform.LocalDensity.current.fontScale) 3 else 6
+                Column {
+                    actions.chunked(perRow).forEach { row ->
+                        Row(Modifier.fillMaxWidth()) { row.forEach { it(Modifier.weight(1f)) } }
+                    }
+                }
+            }
+            HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            // 2. Fortschritt
             val page = vm.pages.getOrNull(vm.currentPage)
             var sliderPos by remember(vm.currentPage) { mutableStateOf(vm.currentPage.toFloat()) }
             val preview = vm.pages.getOrNull(sliderPos.roundToInt())
+            var jumps by remember { mutableStateOf(false) }
+            var goTo by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
                     val ch = (page?.chapter ?: 0)
                     val start = vm.pages.indexOfFirst { it.chapter == ch }
                     if (vm.currentPage > start) vm.goToPage(start) else vm.goToPage(vm.pages.indexOfFirst { it.chapter == ch - 1 }.coerceAtLeast(0))
                 }) { Icon(Icons.Outlined.SkipPrevious, "Vorheriges Kapitel") }
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { goTo = true }, horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         preview?.let { vm.chapters.getOrNull(it.chapter)?.title } ?: "",
                         style = MaterialTheme.typography.labelMedium,
@@ -254,6 +285,8 @@ fun ReaderBottomBar(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // Mehrere Seiten auf einmal: nur bei Bedarf aufklappen
+                TextButton(onClick = { jumps = !jumps }) { Text("± Seiten") }
                 IconButton(onClick = {
                     val ch = (page?.chapter ?: 0)
                     val next = vm.pages.indexOfFirst { it.chapter > ch }
@@ -265,38 +298,38 @@ fun ReaderBottomBar(
                 onValueChange = { sliderPos = it },
                 onValueChangeFinished = { vm.goToPage(sliderPos.roundToInt()) },
                 valueRange = 0f..(vm.pages.size - 1).toFloat(),
+                modifier = Modifier.height(32.dp),
             )
-            // Mehrere Seiten auf einmal blättern
-            var goTo by remember { mutableStateOf(false) }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                listOf(-50, -20, -10, -5).forEach { n -> JumpChip("$n", vm.currentPage + n >= 0) { vm.goToPage(vm.currentPage + n) } }
-                JumpChip("Seite …", true) { goTo = true }
-                listOf(5, 10, 20, 50).forEach { n -> JumpChip("+$n", vm.currentPage + n < vm.pages.size) { vm.goToPage(vm.currentPage + n) } }
+            if (jumps) {
+                // zwei feste Reihen – alles sichtbar, auch auf kleinen Bildschirmen
+                listOf(listOf(-50, -20, -10, -5), listOf(5, 10, 20, 50)).forEach { row ->
+                    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        row.forEach { n ->
+                            val ok = vm.currentPage + n in 0 until vm.pages.size
+                            JumpChip(if (n > 0) "+$n" else "$n", ok, Modifier.weight(1f)) { vm.goToPage(vm.currentPage + n) }
+                        }
+                    }
+                }
+                TextButton(onClick = { goTo = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Zu Seite oder Prozent springen …") }
             }
             if (goTo) GoToPageDialog(vm.currentPage + 1, vm.pages.size, onDismiss = { goTo = false }) { p -> vm.goToPage(p - 1); goTo = false }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                BarAction(Icons.Outlined.TextFields, "Schrift", false, onSettings)
-                BarAction(Icons.Outlined.Palette, "Farben", false, onTheme)
-                BarAction(Icons.Outlined.LocalFireDepartment, "Gemütlich", settings.cozyMode, onCozy)
-                BarAction(Icons.Outlined.RecordVoiceOver, if (ttsOn) "Stopp" else "Vorlesen", ttsOn, onTts)
-                BarAction(Icons.Outlined.MusicNote, "Ambiente", settings.ambientSound != AmbientSound.NONE, onAmbient)
-            }
         }
     }
 }
 
 @Composable
-private fun BarAction(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+private fun BarAction(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(
-        Modifier
+        modifier
+            .padding(horizontal = 2.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 6.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(icon, label, tint = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
-        Text(label, style = MaterialTheme.typography.labelSmall)
+        Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -398,11 +431,6 @@ fun SelectionToolbar(
                 IconButton(onClick = { lookUp(context, text) }) { Icon(Icons.Outlined.Translate, "Nachschlagen") }
                 IconButton(onClick = onSpeak) { Icon(Icons.Outlined.RecordVoiceOver, "Ab hier vorlesen") }
             }
-            Text(
-                "Tipp: Ziehen nach dem langen Drücken oder Tippen auf ein weiteres Wort erweitert die Auswahl.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -914,14 +942,15 @@ private fun InfoLine(label: String, value: String) {
 }
 
 @Composable
-private fun JumpChip(label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun JumpChip(label: String, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         enabled = enabled,
+        modifier = modifier,
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (enabled) 1f else 0.4f),
     ) {
-        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp, vertical = 7.dp))
     }
 }
 

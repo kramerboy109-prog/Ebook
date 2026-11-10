@@ -128,27 +128,6 @@ class AppContainer(val context: Context) {
         db.rooms().update(room.copy(decorated = true, roomWidth = setup.roomWidth.coerceAtMost(2.2f)))
     }
 
-    /** Der Flur als eigener, einrichtbarer Raum (für Deko-Gegenstände und Regale im Gang). */
-    suspend fun ensureHall(): ReadingRoom = decorMutex.withLock {
-        db.rooms().hall() ?: run {
-            val id = db.rooms().insert(
-                ReadingRoom(
-                    name = "Flur", type = "HALL", wallColor = 0xFFD9C7A6.toInt(), wallPattern = "STRIPES", floorType = "PARQUET",
-                    windowView = "AUTO", weather = "CLEAR", lightLevel = 0.75f, lightWarmth = 0.6f, furniture = "", ambientSound = "NONE",
-                    curtainColor = 0xFF7B2D3B.toInt(), sortIndex = -1, decorated = true, roomWidth = 1.45f, roomDepth = 4f,
-                )
-            )
-            db.rooms().insertItems(
-                listOf(
-                    RoomItem(roomId = id, type = "PLANT", x = 0.12f, y = 0.06f, wall = "FLOOR", variant = 1),
-                    RoomItem(roomId = id, type = "SIDE_TABLE", x = 0.86f, y = 0.08f, wall = "FLOOR"),
-                    RoomItem(roomId = id, type = "FLOWERS", x = 0.86f, y = 0.08f, wall = "FLOOR", elev = ItemTypeHeights.SIDE_TABLE, color = 0xFF8E2C2C.toInt()),
-                )
-            )
-            db.rooms().room(id)!!
-        }
-    }
-
     /** Einrichtung auf die Vorlage zurücksetzen. */
     suspend fun resetDecoration(roomId: Long) {
         val room = db.rooms().room(roomId) ?: return
@@ -175,8 +154,4 @@ class AppContainer(val context: Context) {
             db.shelves().allShelves().forEach { runCatching { scanner.scan(it, settings.app.value.onlineCovers) } }
         }
     }
-}
-
-private object ItemTypeHeights {
-    val SIDE_TABLE = com.lesehaus.app.ui.room.ItemType.SIDE_TABLE.h * com.lesehaus.app.ui.room.WORLD_K * 0.94f
 }
