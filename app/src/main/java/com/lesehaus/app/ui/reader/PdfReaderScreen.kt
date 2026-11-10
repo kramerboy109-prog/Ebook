@@ -1,5 +1,7 @@
 package com.lesehaus.app.ui.reader
 
+import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.filled.PlayArrow
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
@@ -249,7 +251,7 @@ class PdfViewModel(private val app: AppContainer, val bookId: Long, private val 
 }
 
 @Composable
-fun PdfReaderScreen(bookId: Long, onBack: () -> Unit, onTextMode: () -> Unit, startPage: Int = -1) {
+fun PdfReaderScreen(bookId: Long, onBack: () -> Unit, onTextMode: (page: Int, action: String) -> Unit, startPage: Int = -1) {
     val context = LocalContext.current
     val container = context.app
     val vm: PdfViewModel = viewModel(key = "pdf_${bookId}_$startPage") { PdfViewModel(container, bookId, startPage) }
@@ -325,7 +327,7 @@ fun PdfReaderScreen(bookId: Long, onBack: () -> Unit, onTextMode: () -> Unit, st
                             }
                         }
                     }
-                    SliderJump(vm, controls) { scope.launch { listState.scrollToItem(it) } }
+                    SliderJump(vm, controls, onTextMode) { scope.launch { listState.scrollToItem(it) } }
                 } else {
                     val pager = rememberPagerState(vm.startPage) { vm.pageCount }
                     LaunchedEffect(pager) { snapshotFlow { pager.settledPage }.collect { vm.onPage(it) } }
@@ -343,7 +345,7 @@ fun PdfReaderScreen(bookId: Long, onBack: () -> Unit, onTextMode: () -> Unit, st
                             }
                         }
                     }
-                    SliderJump(vm, controls) { scope.launch { pager.scrollToPage(it) } }
+                    SliderJump(vm, controls, onTextMode) { scope.launch { pager.scrollToPage(it) } }
                 }
             }
         }
@@ -366,7 +368,7 @@ fun PdfReaderScreen(bookId: Long, onBack: () -> Unit, onTextMode: () -> Unit, st
                     IconButton(onClick = { filter = PdfFilter.entries[(filter.ordinal + 1) % PdfFilter.entries.size] }) { Icon(Icons.Outlined.Contrast, "Filter: ${filter.label}") }
                     IconButton(onClick = { vertical = !vertical }) { Icon(Icons.Outlined.ViewDay, "Ansicht wechseln") }
                     IconButton(onClick = { notesSheet = true }) { Icon(Icons.Filled.Favorite, "Lesezeichen & Notizen", tint = MaterialTheme.colorScheme.primary) }
-                    IconButton(onClick = onTextMode) { Icon(Icons.Outlined.TextSnippet, "Textmodus") }
+                    IconButton(onClick = { onTextMode(vm.currentPage, "") }) { Icon(Icons.Outlined.TextSnippet, "Textmodus") }
                 }
             }
         }
@@ -409,20 +411,43 @@ fun PdfReaderScreen(bookId: Long, onBack: () -> Unit, onTextMode: () -> Unit, st
 }
 
 @Composable
-private fun SliderJump(vm: PdfViewModel, visible: Boolean, onJump: (Int) -> Unit) {
+private fun SliderJump(vm: PdfViewModel, visible: Boolean, onTextMode: (Int, String) -> Unit, onJump: (Int) -> Unit) {
     val signal = vm.jumpSignal
     LaunchedEffect(signal) { if (signal >= 0) { onJump(signal); vm.jumpSignal = -1 } }
     Box(Modifier.fillMaxSize()) {
-        AnimatedVisibility(visible && vm.pageCount > 1, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
-            Surface(color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f), shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)) {
+        AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.97f), shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp), shadowElevation = 6.dp) {
                 var pos by remember(vm.currentPage) { mutableFloatStateOf(vm.currentPage.toFloat()) }
-                Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 18.dp, vertical = 8.dp)) {
-                    Text("Seite ${pos.roundToInt() + 1} / ${vm.pageCount}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.align(Alignment.CenterHorizontally))
-                    Slider(value = pos, onValueChange = { pos = it }, onValueChangeFinished = { onJump(pos.roundToInt()) }, valueRange = 0f..(vm.pageCount - 1).toFloat())
-                    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
-                        listOf(-50, -20, -10, -5, 5, 10, 20, 50).forEach { n ->
-                            val target = vm.currentPage + n
-                            androidx.compose.material3.AssistChip(onClick = { onJump(target.coerceIn(0, vm.pageCount - 1)) }, enabled = target in 0 until vm.pageCount, label = { Text(if (n > 0) "+$n" else "$n") })
+                var jumps by remember { mutableStateOf(false) }
+                Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    // Vorlesen gibt es im Textmodus – direkt ab dieser Seite
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.Button(onClick = { onTextMode(vm.currentPage, "tts") }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Vorlesen", maxLines = 1)
+                        }
+                        androidx.compose.material3.FilledTonalButton(onClick = { onTextMode(vm.currentPage, "voice") }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Outlined.RecordVoiceOver, null); Spacer(Modifier.width(6.dp)); Text("Stimme/KI", maxLines = 1)
+                        }
+                    }
+                    androidx.compose.material3.TextButton(onClick = { onTextMode(vm.currentPage, "") }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("Als Text lesen (Schrift, Markieren, Vorlesen …)")
+                    }
+                    if (vm.pageCount > 1) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Seite ${pos.roundToInt() + 1} / ${vm.pageCount}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                            androidx.compose.material3.TextButton(onClick = { jumps = !jumps }) { Text("± Seiten") }
+                        }
+                        Slider(value = pos, onValueChange = { pos = it }, onValueChangeFinished = { onJump(pos.roundToInt()) }, valueRange = 0f..(vm.pageCount - 1).toFloat())
+                        if (jumps) listOf(listOf(-50, -20, -10, -5), listOf(5, 10, 20, 50)).forEach { row ->
+                            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+                                row.forEach { n ->
+                                    val target = vm.currentPage + n
+                                    androidx.compose.material3.FilledTonalButton(
+                                        onClick = { onJump(target.coerceIn(0, vm.pageCount - 1)) }, enabled = target in 0 until vm.pageCount,
+                                        modifier = Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                    ) { Text(if (n > 0) "+$n" else "$n", maxLines = 1) }
+                                }
+                            }
                         }
                     }
                 }

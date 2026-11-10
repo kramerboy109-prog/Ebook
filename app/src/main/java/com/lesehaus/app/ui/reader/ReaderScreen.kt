@@ -161,6 +161,8 @@ fun ReaderScreen(
     jumpChapter: Int = -1,
     jumpOffset: Int = 0,
     jumpEnd: Int = -1,
+    /** "tts" = sofort vorlesen, "voice" = Stimmauswahl öffnen (z. B. aus der PDF-Ansicht). */
+    startAction: String = "",
 ) {
     val context = LocalContext.current
     val container = context.app
@@ -180,8 +182,19 @@ fun ReaderScreen(
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
 
-    var controlsVisible by remember { mutableStateOf(false) }
+    // Beim Öffnen ist das Menü sichtbar, damit man Vorlesen & Co. gleich findet
+    var controlsVisible by remember { mutableStateOf(true) }
     var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
+    var startDone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(vm.pages.isNotEmpty(), vm.paginating) {
+        if (!startDone && startAction.isNotEmpty() && vm.pages.isNotEmpty() && !vm.paginating) {
+            startDone = true
+            when (startAction) {
+                "tts" -> vm.startTts()
+                "voice" -> sheet = ReaderSheet.VOICE
+            }
+        }
+    }
     var annotationPopup by remember { mutableStateOf<com.lesehaus.app.data.db.Annotation?>(null) }
     var favoriteDialog by remember { mutableStateOf<Pair<Selection, String>?>(null) }
     var noteDialog by remember { mutableStateOf<NoteTarget?>(null) }

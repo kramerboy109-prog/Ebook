@@ -189,13 +189,11 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         compose.setContent { LesehausTheme(AppThemeMode.LIGHT) { ReaderScreen(bookId, false, {}, {}) } }
         waitForText("Gregor Samsa", 30_000)
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage("screens/07_reader.png")
-        // Menü öffnen (Mitte antippen)
-        compose.onRoot().performTouchInput { click(center) }
-        compose.waitForIdle()
+        // beim Öffnen ist das Menü sichtbar
         compose.onRoot().captureRoboImage("screens/08_reader_controls.png")
         compose.onRoot().performTouchInput { click(center) }
         compose.waitForIdle()
+        compose.onRoot().captureRoboImage("screens/07_reader.png")
         // Wort lange drücken → Auswahlwerkzeuge
         compose.onAllNodesWithText("Gregor Samsa", substring = true).fetchSemanticsNodes()
         compose.onRoot().performTouchInput { longClick(androidx.compose.ui.geometry.Offset(width * 0.5f, height * 0.3f)) }
@@ -223,8 +221,6 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
         compose.setContent { LesehausTheme(AppThemeMode.LIGHT) { ReaderScreen(bookId, false, {}, {}) } }
         waitForText("Gregor Samsa", 30_000)
         compose.waitForIdle()
-        compose.onRoot().performTouchInput { click(center) }
-        compose.waitForIdle()
         compose.onRoot().captureRoboImage("screens/08b_reader_controls_small.png")
         // alle Hauptfunktionen sind sichtbar und antippbar
         listOf("Vorlesen", "Stimme/KI", "Schrift", "Farben", "Gemütlich", "Klang").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
@@ -235,10 +231,19 @@ Erst in der Abenddämmerung erwachte Gregor aus seinem schweren ohnmachtsähnlic
     }
 
     @Test
+    fun readerStartsWithVoiceSheet() {
+        // so kommt man aus der PDF-Ansicht über „Stimme/KI“ in den Textmodus
+        compose.setContent { LesehausTheme(AppThemeMode.LIGHT) { ReaderScreen(bookId, false, {}, {}, startAction = "voice") } }
+        waitForText("KI gratis", 30_000)
+    }
+
+    @Test
     fun readerCozyNight() {
         app.settings.updateReader { it.copy(theme = ReaderTheme.FIRELIGHT, cozyMode = true, fontKey = "garamond") }
         compose.setContent { LesehausTheme(AppThemeMode.DARK) { ReaderScreen(bookId, false, {}, {}) } }
         waitForText("Gregor Samsa", 30_000)
+        compose.waitForIdle()
+        compose.onRoot().performTouchInput { click(center) }
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("screens/10_reader_cozy.png")
     }

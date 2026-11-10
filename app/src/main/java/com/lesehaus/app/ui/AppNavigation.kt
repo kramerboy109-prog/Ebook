@@ -144,8 +144,9 @@ fun AppNavigation() {
             ShelfEditorScreen(shelfId = e.arguments?.getLong("id") ?: 0L, onBack = { nav.popBackStack() })
         }
         composable(
-            "reader/{id}?text={text}&ch={ch}&off={off}&end={end}",
+            "reader/{id}?text={text}&ch={ch}&off={off}&end={end}&act={act}",
             arguments = listOf(
+                navArgument("act") { type = NavType.StringType; defaultValue = "" },
                 navArgument("id") { type = NavType.LongType },
                 navArgument("text") { type = NavType.BoolType; defaultValue = false },
                 navArgument("ch") { type = NavType.IntType; defaultValue = -1 },
@@ -159,10 +160,11 @@ fun AppNavigation() {
                 bookId = id,
                 pdfAsText = e.arguments?.getBoolean("text") ?: false,
                 onBack = { nav.popBackStack() },
-                onOpenPdfOriginal = { nav.navigate("pdf/$id") { popUpTo("reader/{id}?text={text}&ch={ch}&off={off}&end={end}") { inclusive = true } } },
+                onOpenPdfOriginal = { nav.navigate("pdf/$id") { popUpTo("reader/{id}?text={text}&ch={ch}&off={off}&end={end}&act={act}") { inclusive = true } } },
                 jumpChapter = e.arguments?.getInt("ch") ?: -1,
                 jumpOffset = e.arguments?.getInt("off") ?: 0,
                 jumpEnd = e.arguments?.getInt("end") ?: -1,
+                startAction = e.arguments?.getString("act") ?: "",
             )
         }
         composable(
@@ -176,7 +178,10 @@ fun AppNavigation() {
                 bookId = id,
                 startPage = page,
                 onBack = { nav.popBackStack() },
-                onTextMode = { nav.navigate("reader/$id?text=true") { popUpTo("pdf/{id}?page={page}") { inclusive = true } } },
+                onTextMode = { page, act ->
+                    // Textmodus an derselben Seite; optional direkt vorlesen oder Stimmauswahl öffnen
+                    nav.navigate("reader/$id?text=true&ch=$page&off=0&act=$act") { popUpTo("pdf/{id}?page={page}") { inclusive = true } }
+                },
             )
         }
         composable(
