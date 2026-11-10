@@ -152,8 +152,9 @@ fun Hallway3D(
     Box(
         modifier.pointerInput(depth) {
             awaitEachGesture {
-                if (opening != null) return@awaitEachGesture
+                // Wichtig: erst auf eine Berührung warten, sonst dreht sich awaitEachGesture im Kreis
                 val down = awaitFirstDown(requireUnconsumed = false)
+                if (opening != null) return@awaitEachGesture
                 camJob?.cancel()
                 val start = cam
                 val proj0 = Proj(size.width.toFloat(), size.height.toFloat(), HALL_W, depth, start, fDepth = 2.2f)
@@ -398,4 +399,13 @@ private fun DrawScope.drawHallDoor(proj: Proj, door: HallDoor, open: Float, t: F
         drawRoundRect(Color(room.curtainColor).darken(0.35f), r.topLeft, r.size, CornerRadius(8f))
         drawRoundRect(Color(0xFFE2C27E).copy(alpha = 0.55f), r.topLeft + Offset(8f, 8f), Size(r.width - 16f, r.height - 16f), CornerRadius(6f), style = Stroke(3f))
     }
+}
+
+/** Bildschirmmitte einer Tür aus der Startposition (für Tests und Hilfen). */
+fun hallDoorScreenCenter(rooms: List<ReadingRoom>, index: Int, sw: Float, sh: Float): Offset {
+    val (doors, depth) = hallDoors(rooms)
+    val door = doors[index]
+    val proj = Proj(sw, sh, HALL_W, depth, Cam(HALL_W / 2, depth + 0.2f), fDepth = 2.2f)
+    val q = doorQuad(door, HALL_W).map { (x, y, d) -> proj.p(x, y, d) }
+    return Offset(q.map { it.x }.average().toFloat(), q.map { it.y }.average().toFloat())
 }

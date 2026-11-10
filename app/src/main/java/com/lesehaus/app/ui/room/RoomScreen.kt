@@ -309,9 +309,10 @@ fun RoomScreen(
                 .fillMaxSize()
                 .pointerInput(r.id, r.roomWidth, r.roomDepth) {
                     awaitEachGesture {
-                        val c0 = cam ?: return@awaitEachGesture
-                        val proj0 = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c0)
+                        // Erst auf eine Berührung warten – ein Rücksprung davor ließe die Gestenschleife endlos laufen
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        val c0 = cam ?: defaultCam(r)
+                        val proj0 = Proj(size.width.toFloat(), size.height.toFloat(), r.roomWidth, r.roomDepth, c0)
                         camJob?.cancel()
                         val hit = hitTest3D(down.position, currentScene, proj0, includeDecals = currentEdit)
                         if (currentEdit && hit != null) {
